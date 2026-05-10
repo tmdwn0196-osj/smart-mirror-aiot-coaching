@@ -7,6 +7,7 @@ import requests
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://127.0.0.1:7000")
+    parser.add_argument("--timeout", type=float, default=90.0)
     args = parser.parse_args()
 
     baseline_payload = {
@@ -41,9 +42,9 @@ def main() -> None:
     baseline_response = requests.post(
         f"{args.base_url}/api/exercise/baseline",
         json=baseline_payload,
-        timeout=30,
+        timeout=args.timeout,
     )
-    print("baseline", baseline_response.status_code)
+    print("baseline 저장 응답", baseline_response.status_code)
     print(json.dumps(baseline_response.json(), ensure_ascii=False, indent=2))
     baseline_response.raise_for_status()
 
@@ -76,9 +77,9 @@ def main() -> None:
     response = requests.post(
         f"{args.base_url}/api/coach/generate",
         json=payload,
-        timeout=30,
+        timeout=args.timeout,
     )
-    print("plan", response.status_code)
+    print("운동 계획 응답", response.status_code)
     print(json.dumps(response.json(), ensure_ascii=False, indent=2))
     response.raise_for_status()
 

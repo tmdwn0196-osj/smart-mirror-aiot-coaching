@@ -65,7 +65,7 @@ cp ../.env.example .env
 
 - `http://0.0.0.0:7000`
 
-health check:
+상태 확인:
 
 ```bash
 curl http://127.0.0.1:7000/health

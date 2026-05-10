@@ -6,11 +6,12 @@ from app.config import (
     FALLBACK_LLM_BASE_URL,
     FALLBACK_LLM_ENABLED,
     FALLBACK_LLM_MODEL_NAME,
+    FALLBACK_LLM_TIMEOUT_SECONDS,
     LLM_HEALTH_TIMEOUT_SECONDS,
     LLM_MAX_RETRIES,
     LLM_MAX_TOKENS,
     LLM_TEMPERATURE,
-    LLM_TIMEOUT_SECONDS,
+    PRIMARY_LLM_TIMEOUT_SECONDS,
     PRIMARY_LLM_API_KEY,
     PRIMARY_LLM_BASE_URL,
     PRIMARY_LLM_MODEL_NAME,
@@ -99,12 +100,14 @@ def _call_openai_compatible(
     system_prompt: str,
     user_prompt: str,
     max_tokens: int | None = None,
+    expect_json: bool = True,
+    timeout_seconds: float = 30.0,
 ) -> str:
-    http_client = httpx.Client(timeout=LLM_TIMEOUT_SECONDS, trust_env=False)
+    http_client = httpx.Client(timeout=timeout_seconds, trust_env=False)
     client = OpenAI(
         base_url=base_url,
         api_key=api_key,
-        timeout=LLM_TIMEOUT_SECONDS,
+        timeout=timeout_seconds,
         max_retries=LLM_MAX_RETRIES,
         http_client=http_client,
     )
@@ -117,7 +120,7 @@ def _call_openai_compatible(
             ],
             temperature=LLM_TEMPERATURE,
             max_tokens=max_tokens or LLM_MAX_TOKENS,
-            response_format={"type": "json_object"},
+            response_format={"type": "json_object"} if expect_json else None,
         )
         return response.choices[0].message.content or ""
     finally:
@@ -126,7 +129,7 @@ def _call_openai_compatible(
 
 def call_primary_llm(system_prompt: str, user_prompt: str) -> dict:
     if not is_primary_llm_configured():
-        raise RuntimeError("primary llm is not configured")
+        raise RuntimeError("기본 LLM이 설정되어 있지 않습니다.")
     return {
         "content": _call_openai_compatible(
             base_url=PRIMARY_LLM_BASE_URL,
@@ -135,6 +138,8 @@ def call_primary_llm(system_prompt: str, user_prompt: str) -> dict:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             max_tokens=LLM_MAX_TOKENS,
+            expect_json=True,
+            timeout_seconds=PRIMARY_LLM_TIMEOUT_SECONDS,
         ),
         "served_by": "primary",
         "model_name": PRIMARY_LLM_MODEL_NAME,
@@ -145,9 +150,9 @@ def call_primary_llm(system_prompt: str, user_prompt: str) -> dict:
 
 def call_fallback_llm(system_prompt: str, user_prompt: str, primary_error: str) -> dict:
     if not FALLBACK_LLM_ENABLED:
-        raise RuntimeError("fallback llm is disabled")
+        raise RuntimeError("보조 LLM이 비활성화되어 있습니다.")
     if not FALLBACK_LLM_API_KEY.strip():
-        raise RuntimeError("fallback llm is not configured")
+        raise RuntimeError("보조 LLM이 설정되어 있지 않습니다.")
     return {
         "content": _call_openai_compatible(
             base_url=FALLBACK_LLM_BASE_URL,
@@ -155,7 +160,9 @@ def call_fallback_llm(system_prompt: str, user_prompt: str, primary_error: str) 
             model_name=FALLBACK_LLM_MODEL_NAME,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            max_tokens=min(64, LLM_MAX_TOKENS),
+            max_tokens=min(24, LLM_MAX_TOKENS),
+            expect_json=False,
+            timeout_seconds=FALLBACK_LLM_TIMEOUT_SECONDS,
         ),
         "served_by": "fallback",
         "model_name": FALLBACK_LLM_MODEL_NAME,
@@ -175,7 +182,7 @@ def call_llm_with_fallback(
         result = call_primary_llm(system_prompt, user_prompt)
         if result["content"].strip():
             return result
-        raise RuntimeError("primary llm returned empty content")
+        raise RuntimeError("기본 LLM 응답이 비어 있습니다.")
     except Exception as primary_exc:
         if not is_fallback_llm_configured():
             raise

@@ -13,30 +13,51 @@ SYSTEM_PROMPT = (
     "JSON 밖에 Markdown, 설명문, 자연어 문장을 붙이지 않는다."
 )
 
+COMPACT_SYSTEM_PROMPT = (
+    "입력을 보고 PC3에 보낼 짧은 한국어 한 문장만 출력한다.\n"
+    "JSON, 코드블록, key 이름, 설명문은 금지한다.\n"
+    "문장은 30자 안팎으로 짧고 바로 실행할 수 있게 쓴다."
+)
+
 
 def _build_user_prompt(prompt_payload: dict[str, Any], *, compact: bool) -> str:
     if compact:
+        exercise = (
+            ((prompt_payload.get("feature_json") or {}).get("features") or {}).get("exercise") or {}
+        )
+        baseline = prompt_payload.get("baseline_profile") or {}
         slim_payload = {
             "purpose": prompt_payload.get("purpose"),
-            "feature_summary": prompt_payload.get("feature_summary"),
-            "baseline_profile": prompt_payload.get("baseline_profile"),
-            "detected_signals": [
+            "exercise": {
+                "type": exercise.get("type"),
+                "rep_count": exercise.get("rep_count") if exercise.get("rep_count") is not None else exercise.get("count"),
+                "stability_score": exercise.get("stability_score"),
+                "posture_errors": (exercise.get("posture_errors") or [])[:1],
+                "squat_depth": exercise.get("squat_depth"),
+                "knee_angle": exercise.get("knee_angle"),
+                "back_angle": exercise.get("back_angle"),
+                "duration_sec": exercise.get("duration_sec") if exercise.get("duration_sec") is not None else exercise.get("duration_seconds"),
+                "tempo": exercise.get("tempo"),
+            },
+            "baseline": {
+                "recommended_sets": baseline.get("recommended_sets"),
+                "recommended_reps": baseline.get("recommended_reps"),
+                "stability_score_avg": baseline.get("stability_score_avg"),
+            },
+            "signals": [
                 {
                     "label": item.get("label"),
-                    "value": item.get("value"),
                     "severity": item.get("severity"),
                 }
                 for item in prompt_payload.get("detected_signals", [])
                 if isinstance(item, dict)
-            ][:4],
+            ][:2],
         }
         return (
             "/no_think\n"
-            "아래 요약만 사용해 JSON만 출력. "
-            "key는 summary,priority,exercise_plan,mirror_message,warnings,pc2_payload. "
-            "exercise_plan은 2~3개. 각 item key는 exercise,sets,reps,duration_sec,rest_sec,focus,reason. "
-            "pc2_payload key는 message,display_lines. "
-            "message는 한 줄, display_lines는 2~3줄. "
+            "짧은 한국어 한 문장만 출력. "
+            "JSON 금지. 코드블록 금지. "
+            "한 줄 조언만 작성. "
             + json.dumps(slim_payload, ensure_ascii=False, separators=(",", ":"))
         )
 
@@ -56,4 +77,6 @@ def _build_user_prompt(prompt_payload: dict[str, Any], *, compact: bool) -> str:
 
 
 def build_coach_prompt(prompt_payload: dict[str, Any], *, compact: bool = False) -> tuple[str, str]:
-    return SYSTEM_PROMPT, _build_user_prompt(prompt_payload, compact=compact)
+    if compact:
+        return COMPACT_SYSTEM_PROMPT, _build_user_prompt(prompt_payload, compact=True)
+    return SYSTEM_PROMPT, _build_user_prompt(prompt_payload, compact=False)

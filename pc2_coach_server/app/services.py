@@ -1,4 +1,5 @@
 from time import perf_counter
+import re
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -139,25 +140,46 @@ def local_llm_result(reason: str) -> dict:
     }
 
 
-def apply_fallback_style(response: dict) -> dict:
-    response["summary"] = str(response.get("summary") or "").strip()
-    response["priority"] = str(response.get("priority") or "").strip()
-    response["mirror_message"] = str(response.get("mirror_message") or "").strip()
-    response["exercise_plan"] = list(response.get("exercise_plan") or [])[:3]
-    pc2_payload = dict(response.get("pc2_payload") or {})
-    pc2_payload["message"] = str(pc2_payload.get("message") or response["mirror_message"]).strip()
-    pc2_payload["display_lines"] = list(pc2_payload.get("display_lines") or [])[:3]
-    response["pc2_payload"] = pc2_payload
-    if response["mirror_message"] and not response["mirror_message"].endswith("!"):
-        response["mirror_message"] = response["mirror_message"].rstrip(". ") + "!"
-    return response
+def build_fallback_message_response(message: str, warnings: list[str]) -> dict:
+    raw = str(message or "").strip()
+    summary_match = re.search(r'"summary"\s*:\s*"([^"]+)"', raw)
+    if summary_match:
+        raw = summary_match.group(1)
+    raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
+    raw = re.sub(r"\s*```$", "", raw)
+    raw = raw.replace("{", " ").replace("}", " ")
+    raw = re.sub(r'"(?:summary|priority|mirror_message|message)"\s*:\s*', " ", raw)
+    clean = " ".join(raw.split())
+    if not clean:
+        clean = "지금은 자세 요약만 전달합니다. 천천히 정확하게 진행하세요."
+    if not clean.endswith(("!", ".", "?")):
+        clean += "."
+    return {
+        "summary": clean,
+        "priority": clean,
+        "exercise_plan": [],
+        "mirror_message": clean,
+        "warnings": warnings,
+        "pc2_payload": {
+            "message": clean,
+            "display_lines": [clean],
+        },
+    }
+
+
+def build_fallback_log_payload(response: dict) -> tuple[dict, dict]:
+    message = str((((response.get("pc2_payload") or {}).get("message")) or "")).strip()
+    if not message:
+        message = str(response.get("mirror_message") or response.get("summary") or "").strip()
+    simple = {"message": message}
+    return simple, simple
 
 
 def validate_trigger(payload: FeaturePayload) -> None:
     if payload.event != EXPECTED_EVENT:
         raise HTTPException(
             status_code=422,
-            detail=f"exercise mode는 {EXPECTED_EVENT} event에서만 운동 계획을 생성합니다.",
+            detail=f"exercise 모드는 {EXPECTED_EVENT} 이벤트에서만 운동 계획을 생성합니다.",
         )
 
 
@@ -291,55 +313,56 @@ def generate_coaching_response(payload: FeaturePayload, logger) -> dict:
                 enriched_payload, baseline_profile, signal_dicts, analysis_context, warnings, "llm call failed"
             )
         else:
-            try:
-                final_response = parse_coaching_json(raw_llm_response, base_response)
-            except Exception as exc:
-                if llm_result["served_by"] == "primary" and FALLBACK_LLM_ENABLED:
-                    fallback_started_at = perf_counter()
-                    try:
-                        llm_result = call_fallback_llm(
-                            fallback_system_prompt,
-                            fallback_user_prompt,
-                            primary_error=f"parse_failed: {exc}",
-                        )
-                        raw_llm_response = llm_result["content"]
-                        llm_latency_ms = int((perf_counter() - fallback_started_at) * 1000)
-                        final_response = parse_coaching_json(raw_llm_response, base_response)
-                    except Exception as fallback_exc:
+            if llm_result["served_by"] == "fallback":
+                final_response = build_fallback_message_response(raw_llm_response, warnings)
+            else:
+                try:
+                    final_response = parse_coaching_json(raw_llm_response, base_response)
+                except Exception as exc:
+                    if llm_result["served_by"] == "primary" and FALLBACK_LLM_ENABLED:
+                        fallback_started_at = perf_counter()
+                        try:
+                            llm_result = call_fallback_llm(
+                                fallback_system_prompt,
+                                fallback_user_prompt,
+                                primary_error=f"parse_failed: {exc}",
+                            )
+                            raw_llm_response = llm_result["content"]
+                            llm_latency_ms = int((perf_counter() - fallback_started_at) * 1000)
+                            final_response = build_fallback_message_response(raw_llm_response, warnings)
+                        except Exception as fallback_exc:
+                            logger.warning(
+                                "coach_request_local_fallback request_id=%s user_id=%s mode=%s reason=fallback_parse_failed error=%s",
+                                request_id,
+                                payload.user_id,
+                                payload.mode,
+                                fallback_exc,
+                            )
+                            llm_latency_ms = 0
+                            raw_llm_response = ""
+                            llm_result = local_llm_result(f"fallback_parse_failed: {fallback_exc}")
+                            final_response = build_local_plan_response(
+                                enriched_payload,
+                                baseline_profile,
+                                signal_dicts,
+                                analysis_context,
+                                warnings,
+                                "fallback parse failed",
+                            )
+                    else:
                         logger.warning(
-                            "coach_request_local_fallback request_id=%s user_id=%s mode=%s reason=fallback_parse_failed error=%s",
+                            "coach_request_local_fallback request_id=%s user_id=%s mode=%s reason=llm_parse_failed error=%s",
                             request_id,
                             payload.user_id,
                             payload.mode,
-                            fallback_exc,
+                            exc,
                         )
                         llm_latency_ms = 0
                         raw_llm_response = ""
-                        llm_result = local_llm_result(f"fallback_parse_failed: {fallback_exc}")
+                        llm_result = local_llm_result(f"llm_parse_failed: {exc}")
                         final_response = build_local_plan_response(
-                            enriched_payload,
-                            baseline_profile,
-                            signal_dicts,
-                            analysis_context,
-                            warnings,
-                            "fallback parse failed",
+                            enriched_payload, baseline_profile, signal_dicts, analysis_context, warnings, "llm parse failed"
                         )
-                else:
-                    logger.warning(
-                        "coach_request_local_fallback request_id=%s user_id=%s mode=%s reason=llm_parse_failed error=%s",
-                        request_id,
-                        payload.user_id,
-                        payload.mode,
-                        exc,
-                    )
-                    llm_latency_ms = 0
-                    raw_llm_response = ""
-                    llm_result = local_llm_result(f"llm_parse_failed: {exc}")
-                    final_response = build_local_plan_response(
-                        enriched_payload, baseline_profile, signal_dicts, analysis_context, warnings, "llm parse failed"
-                    )
-            if llm_result["served_by"] == "fallback":
-                final_response = apply_fallback_style(final_response)
     else:
         llm_latency_ms = 0
         raw_llm_response = ""
@@ -347,6 +370,11 @@ def generate_coaching_response(payload: FeaturePayload, logger) -> dict:
         final_response = build_local_plan_response(
             enriched_payload, baseline_profile, signal_dicts, analysis_context, warnings, "no llm configured"
         )
+
+    db_pc2_output = final_response.get("pc2_payload")
+    db_final_response = final_response
+    if llm_result["served_by"] == "fallback":
+        db_pc2_output, db_final_response = build_fallback_log_payload(final_response)
 
     save_coach_log(
         request_id=request_id,
@@ -358,10 +386,10 @@ def generate_coaching_response(payload: FeaturePayload, logger) -> dict:
         detected_signals_json=signal_dicts,
         analysis_context_json=analysis_context,
         baseline_snapshot_json=dump_model(baseline_profile),
-        pc2_output_json=final_response.get("pc2_payload"),
+        pc2_output_json=db_pc2_output,
         llm_prompt=llm_prompt,
         raw_llm_response=raw_llm_response,
-        final_response_json=final_response,
+        final_response_json=db_final_response,
         model_name=llm_result["model_name"],
         llm_route=llm_result["served_by"],
         fallback_used=llm_result["fallback_used"],

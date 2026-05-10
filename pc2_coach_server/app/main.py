@@ -19,7 +19,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="PC2 Exercise Planning API", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="PC2 운동 계획 API", version="0.3.0", lifespan=lifespan)
 
 
 @app.get("/health")

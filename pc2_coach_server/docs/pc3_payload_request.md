@@ -1,4 +1,4 @@
-# PC3 -> PC2 Exercise Planning Spec
+# PC3 -> PC2 운동 계획 명세
 
 ## 목적
 
@@ -23,7 +23,7 @@ PC2는 PC3가 보낸 운동 feature, 저장된 baseline, 로컬 검색 컨텍스
 4. PC2가 결과를 DB에 저장하고 응답 JSON을 PC3에 반환
 5. PC3는 응답의 `pc2_payload`를 PC2 화면 또는 미러 메시지에 전달
 
-## Endpoint
+## 엔드포인트
 
 ### Baseline 저장
 
@@ -118,15 +118,32 @@ Content-Type: application/json
 }
 ```
 
+fallback 경로에서도 PC2는 raw plain text를 직접 반환하지 않습니다.
+항상 `CoachingResponse` JSON을 유지하며, fallback 모델이 한 줄 조언만 생성한 경우에는 아래처럼 최소 응답으로 내려갑니다.
+
+```json
+{
+  "summary": "무릎 정렬을 먼저 맞추고 천천히 진행하세요.",
+  "priority": "무릎 정렬을 먼저 맞추고 천천히 진행하세요.",
+  "exercise_plan": [],
+  "mirror_message": "무릎 정렬을 먼저 맞추고 천천히 진행하세요.",
+  "warnings": [],
+  "pc2_payload": {
+    "message": "무릎 정렬을 먼저 맞추고 천천히 진행하세요.",
+    "display_lines": ["무릎 정렬을 먼저 맞추고 천천히 진행하세요."]
+  }
+}
+```
+
 ## DB 기록 항목
 
 PC2는 아래를 저장합니다.
 
 - 원본 FeaturePayload
-- baseline snapshot
-- detected signals
+- baseline 스냅샷
+- 감지 신호
 - analysis_context
-- raw_llm_response
+- 원본 LLM 응답
 - final_response_json
 - pc2_output_json
 
@@ -134,4 +151,5 @@ PC2는 아래를 저장합니다.
 
 - 원본 이미지, 영상, landmark 배열은 보내지 않음
 - PC3에서 계산한 수치와 상태값만 전달
-- baseline이 없어도 계획 생성은 가능하지만 warning이 추가됨
+- baseline이 없어도 계획 생성은 가능하지만 경고가 추가됨
+- fallback 시에도 PC3는 plain text가 아니라 JSON 응답을 받음

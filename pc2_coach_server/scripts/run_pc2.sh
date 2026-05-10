@@ -42,7 +42,7 @@ PORT="${PORT:-7000}"
 LOG_LEVEL="${LOG_LEVEL:-info}"
 
 if [ -z "${PYTHON_BIN}" ] || [ ! -x "${PYTHON_BIN}" ]; then
-  echo "root virtualenv not found: ${REPO_DIR}/.venv/bin/python" >&2
+  echo "루트 가상환경을 찾지 못했습니다: ${REPO_DIR}/.venv/bin/python" >&2
   exit 127
 fi
 

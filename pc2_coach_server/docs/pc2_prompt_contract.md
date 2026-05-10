@@ -1,6 +1,6 @@
-# PC2 Prompt Contract
+# PC2 프롬프트 계약
 
-이 문서는 현재 `exercise` 전용 PC2 Exercise Planning API의 prompt/payload 계약입니다.
+이 문서는 현재 `exercise` 전용 PC2 운동 계획 API의 prompt/payload 계약입니다.
 
 ## 입력 계약
 
@@ -29,7 +29,7 @@ PC2는 정확히 하나의 JSON 객체인 `FeaturePayload`만 입력으로 받�
 
 - 원본 이미지 파일
 - base64 이미지 문자열
-- frame path 또는 local image path
+- frame 경로 또는 local image 경로
 - 영상 파일
 - 전체 landmark list
 - segmentation mask
@@ -66,7 +66,10 @@ PC2는 `CoachingResponse` JSON 객체만 반환해야 합니다.
 }
 ```
 
-JSON 밖에 Markdown, 설명문, 추가 자연어 문장을 붙이지 않습니다.
+JSON 바깥에 Markdown, 설명문, 추가 자연어 문장을 붙이지 않습니다.
+
+fallback 경로에서도 raw plain text를 직접 반환하지 않습니다.
+fallback 모델이 한 줄 조언만 생성하더라도 서버는 그 문장을 `CoachingResponse` 안에 담아 반환합니다.
 
 ## 안전 규칙
 
@@ -95,11 +98,13 @@ PC2 모델은 다음을 하면 안 됩니다.
 - 다음 운동 계획
 - PC2 화면 표시용 짧은 메시지
 
+fallback 경로에서는 `exercise_plan`이 비어 있을 수 있으며, 이 경우 `pc2_payload.message` 한 줄을 우선 사용합니다.
+
 PC3는 `exercise`에서 `session_completed` 시점에만 PC2를 호출합니다.
 
-## Prompt 작성 원칙
+## 프롬프트 작성 원칙
 
-PC2 system prompt에는 최소한 다음 원칙을 포함합니다.
+PC2 시스템 프롬프트에는 최소한 다음 원칙을 포함합니다.
 
 ```text
 너는 스마트미러 운동 계획 API다.

@@ -1,17 +1,17 @@
 # PC2 연결 가이드
 
-이 문서는 현재 `exercise` 전용 PC2 Exercise Planning API를 PC3 Vision Gateway에 연결할 때 필요한 endpoint, payload, 응답 규칙을 정리합니다.
+이 문서는 현재 `exercise` 전용 PC2 운동 계획 API를 PC3 Vision Gateway에 연결할 때 필요한 엔드포인트, payload, 응답 규칙을 정리합니다.
 
 ## 연결 방향
 
 ```text
-PC1 -> PC3 Vision Gateway -> PC2 Exercise Planning API
+PC1 -> PC3 Vision Gateway -> PC2 운동 계획 API
 ```
 
 PC2는 PC3에서 전달하는 운동 `FeaturePayload`만 받아 운동 계획표 JSON을 생성합니다.
 PC2는 저장된 baseline과 로컬 운동 지식 검색 결과를 함께 사용합니다.
 
-## Endpoint
+## 엔드포인트
 
 ```http
 POST /api/coach/generate
@@ -24,18 +24,18 @@ PC3 설정:
 PC2_COACH_API_URL=http://<PC2_HOST>:7000/api/coach/generate
 ```
 
-## Runtime
+## 실행 구조
 
 PC2 내부 구조:
 
 ```text
 Coach API
-  -> Baseline Lookup
-  -> Signal Detection
-  -> Local Knowledge Retrieval
-  -> Prompt Manager
+  -> Baseline 조회
+  -> 신호 감지
+  -> 로컬 지식 검색
+  -> 프롬프트 구성
   -> NVIDIA Gemma 4 31B IT
-  -> Output Validator
+  -> 출력 검증
 ```
 
 ## 입력: FeaturePayload
@@ -88,13 +88,13 @@ PC2는 원본 이미지를 받지 않습니다. 입력은 반드시 `FeaturePayl
 
 금지 입력:
 
-- raw image file
-- base64 image
-- frame path
-- video path
-- full landmark list
-- segmentation mask
-- camera stream URL
+- 원본 이미지 파일
+- base64 이미지
+- 프레임 경로
+- 영상 경로
+- 전체 landmark 목록
+- 분할 마스크
+- 카메라 스트림 URL
 
 ## 출력: CoachingResponse
 
@@ -129,6 +129,25 @@ PC2는 반드시 `CoachingResponse` JSON만 반환합니다.
 }
 ```
 
+보조 LLM fallback 시에도 응답 형식은 그대로 `CoachingResponse` JSON입니다.
+이때 구조화된 운동 계획 대신 한 줄 문장을 최소 응답으로 채워 반환할 수 있습니다.
+
+```json
+{
+  "summary": "무릎 정렬을 먼저 맞추고 천천히 진행하세요.",
+  "priority": "무릎 정렬을 먼저 맞추고 천천히 진행하세요.",
+  "exercise_plan": [],
+  "mirror_message": "무릎 정렬을 먼저 맞추고 천천히 진행하세요.",
+  "warnings": [],
+  "pc2_payload": {
+    "message": "무릎 정렬을 먼저 맞추고 천천히 진행하세요.",
+    "display_lines": [
+      "무릎 정렬을 먼저 맞추고 천천히 진행하세요."
+    ]
+  }
+}
+```
+
 ## PC2 호출 시점
 
 | mode | event | PC2 호출 여부 |
@@ -136,3 +155,5 @@ PC2는 반드시 `CoachingResponse` JSON만 반환합니다.
 | `exercise` | `session_completed` | 호출 |
 
 운동 실시간 count/state/feedback은 PC3가 직접 처리합니다. PC2는 세션 종료 후 최종 계획 생성만 담당합니다.
+
+PC3가 화면에 바로 표시할 때는 `pc2_payload.message`를 우선 사용하면 됩니다.

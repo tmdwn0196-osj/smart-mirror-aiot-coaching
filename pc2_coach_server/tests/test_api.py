@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from fastapi import HTTPException
 from pydantic import ValidationError
+from app.output_validator import parse_coaching_json
 
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
@@ -177,10 +178,72 @@ class PC2ApiTests(unittest.TestCase):
         self.assertTrue(any("로컬 규칙 기반" in item for item in response["warnings"]))
         self.assertGreaterEqual(len(response["exercise_plan"]), 1)
 
+    def test_fallback_llm_plain_message_response(self):
+        llm_result = {
+            "content": "오늘은 무릎 정렬만 신경 쓰고 천천히 진행하세요",
+            "served_by": "fallback",
+            "model_name": "fallback-model",
+            "fallback_used": True,
+            "primary_error": "primary timeout",
+        }
+        with patch("app.services.is_fallback_llm_configured", return_value=True), patch(
+            "app.services.call_llm_with_fallback", return_value=llm_result
+        ):
+            response = self.main.generate_coaching(
+                self.schemas.FeaturePayload(
+                    user_id="u5",
+                    session_id="s1",
+                    mode="exercise",
+                    event="session_completed",
+                    features=self.schemas.FeatureBundle(
+                        exercise=self.schemas.ExerciseFeature(
+                            type="squat",
+                            rep_count=8,
+                            stability_score=0.64,
+                            posture_errors=["knees_caving_in"],
+                            squat_depth=0.49,
+                            knee_angle=118,
+                            back_angle="forward",
+                            duration_sec=42,
+                            tempo="fast",
+                        )
+                    ),
+                )
+            )
+        self.assertEqual(response["exercise_plan"], [])
+        self.assertEqual(response["pc2_payload"]["display_lines"], [response["pc2_payload"]["message"]])
+        self.assertIn("천천히 진행하세요", response["pc2_payload"]["message"])
+
+        logs = self.main.coach_logs("u5", limit=10)
+        self.assertEqual(logs["logs"][0]["pc2_output"], {"message": response["pc2_payload"]["message"]})
+        self.assertEqual(logs["logs"][0]["final_response"], {"message": response["pc2_payload"]["message"]})
+
     def test_logs_limit_out_of_range_rejected(self):
         with self.assertRaises(HTTPException) as ctx:
             self.main.coach_logs("u1", limit=0)
         self.assertEqual(ctx.exception.status_code, 422)
+
+    def test_parse_coaching_json_accepts_partial_fields(self):
+        raw = '{"summary":"요약","priority":"무릎 정렬","plan":[{"exercise":"tempo squat","sets":3,"reps":6,"focus":"천천히","reason":"정렬 우선"}],"message":"천천히 진행하세요!"}'
+        parsed = parse_coaching_json(raw, {"warnings": []})
+        self.assertEqual(parsed["summary"], "요약")
+        self.assertEqual(parsed["priority"], "무릎 정렬")
+        self.assertEqual(parsed["mirror_message"], "천천히 진행하세요!")
+        self.assertEqual(parsed["pc2_payload"]["message"], "천천히 진행하세요!")
+        self.assertEqual(parsed["exercise_plan"][0]["exercise"], "tempo squat")
+
+    def test_parse_coaching_json_rejects_empty_content(self):
+        with self.assertRaises(ValueError) as ctx:
+            parse_coaching_json("{}", {"warnings": []})
+        self.assertIn("사용할 수 있는 내용", str(ctx.exception))
+
+    def test_parse_coaching_json_accepts_wrapped_response(self):
+        raw = '{"CoachingResponse":{"summary":"요약","priority":"무릎 정렬","exercise_plan":[{"exercise":"Tempo Squat","sets":3,"reps":6,"focus":"하강 3초","reason":"교정"}],"mirror_message":"천천히 내려가세요!","warnings":["주의"],"pc2_payload":{"message":"템포 조절부터 시작","display_lines":["하강 3초"]}}}'
+        parsed = parse_coaching_json(raw, {"warnings": []})
+        self.assertEqual(parsed["summary"], "요약")
+        self.assertEqual(parsed["priority"], "무릎 정렬")
+        self.assertEqual(parsed["exercise_plan"][0]["exercise"], "Tempo Squat")
+        self.assertEqual(parsed["pc2_payload"]["message"], "템포 조절부터 시작")
 
 
 if __name__ == "__main__":

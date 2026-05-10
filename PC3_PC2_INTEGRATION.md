@@ -199,6 +199,29 @@ Content-Type: application/json
 }
 ```
 
+### 보조 LLM fallback 응답 규칙
+
+fallback 경로에서도 PC2는 raw plain text를 직접 반환하지 않습니다.
+PC3에는 항상 JSON 응답을 반환하며, fallback 모델이 구조화된 계획을 만들지 못하면 아래처럼 한 줄 문장을 담은 최소 `CoachingResponse` 형태로 응답합니다.
+
+```json
+{
+  "summary": "무릎 정렬을 먼저 맞추고 천천히 진행하세요.",
+  "priority": "무릎 정렬을 먼저 맞추고 천천히 진행하세요.",
+  "exercise_plan": [],
+  "mirror_message": "무릎 정렬을 먼저 맞추고 천천히 진행하세요.",
+  "warnings": [],
+  "pc2_payload": {
+    "message": "무릎 정렬을 먼저 맞추고 천천히 진행하세요.",
+    "display_lines": [
+      "무릎 정렬을 먼저 맞추고 천천히 진행하세요."
+    ]
+  }
+}
+```
+
+즉 PC3는 항상 JSON으로 받고, fallback 시에는 `pc2_payload.message`의 한 줄 문장을 우선 사용하면 됩니다.
+
 ## 4. PC3에서 응답 활용 방식
 
 ### 서버 로직용
@@ -213,6 +236,8 @@ Content-Type: application/json
 - `mirror_message`
 - `pc2_payload.message`
 - `pc2_payload.display_lines`
+
+fallback 한 줄 응답일 때는 `pc2_payload.message`와 `display_lines[0]`이 같은 문장일 수 있습니다.
 
 ## 5. Python 호출 예시
 
@@ -255,3 +280,7 @@ result = resp.json()
 - 계획 생성 endpoint는 세션 종료 시점에만 호출
 - `type`이 지원 운동 5개 중 하나인지 확인
 - 이미지/비디오/landmark 원본은 보내지 않음
+
+## 7. PC3 전달용 요약
+
+PC2는 정상 경로와 fallback 경로 모두에서 항상 `CoachingResponse` JSON을 반환합니다. fallback이 발생해도 raw plain text를 직접 반환하지 않으며, 한 줄 조언만 생성된 경우 그 문장을 `summary`, `priority`, `mirror_message`, `pc2_payload.message`, `pc2_payload.display_lines[0]`에 담아 최소 응답 형태로 내려보냅니다. 이 경우 `exercise_plan`은 빈 배열일 수 있으므로, PC3 화면 표시는 `pc2_payload.message`를 우선 사용하면 됩니다.

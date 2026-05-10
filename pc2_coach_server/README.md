@@ -1,4 +1,4 @@
-# PC2 Exercise Planning API
+# PC2 운동 계획 API
 PC2는 PC3 Vision Gateway가 계산한 운동 feature를 입력으로 받아, 저장된 baseline과 로컬 운동 지식 검색 결과를 함께 사용해 LLM 기반 운동 계획표를 생성하는 FastAPI 서버입니다.
 
 현재 구현은 `exercise` 전용입니다. 운동 계획 생성 흐름만 활성화되어 있습니다.
@@ -11,18 +11,18 @@ PC2는 PC3 Vision Gateway가 계산한 운동 feature를 입력으로 받아, �
 - `lunge`
 - `pushup`
 
-## Flow
+## 처리 흐름
 
 ```text
-PC3 -> PC2 Exercise Planning API
+PC3 -> PC2 운동 계획 API
 
 FeaturePayload
-  -> Stored Exercise Baseline
-  -> Local RAG Knowledge Retrieval
-  -> Prompt Manager
+  -> 저장된 운동 baseline
+  -> 로컬 운동 지식 검색
+  -> 프롬프트 구성
   -> NVIDIA Gemma 4 31B IT
-  -> Output Validator
-  -> CoachingResponse
+  -> 출력 검증
+  -> 코칭 응답
 ```
 
 PC3는 운동 분석 결과를 `FeaturePayload` JSON으로 보내고, PC2는:
@@ -36,7 +36,7 @@ PC3는 운동 분석 결과를 `FeaturePayload` JSON으로 보내고, PC2는:
 
 문서 기준본은 [docs/README.md](/home/osj/smart-mirror-aiot-coaching/pc2_coach_server/docs/README.md:1) 를 참고합니다.
 
-## Run
+## 실행 방법
 
 ```bash
 cd /home/osj/smart-mirror-aiot-coaching/pc2_coach_server
@@ -45,7 +45,7 @@ cp ../.env.example .env
 ```
 
 - 환경변수 파일은 `pc2_coach_server/.env`를 우선 로드합니다.
-- `.env`가 없어도 실행은 가능하며, 이 경우 기본값과 로컬 규칙 기반 fallback을 사용합니다.
+- `.env`가 없어도 실행은 가능하며, 이 경우 기본값과 로컬 규칙 기반 대체 경로를 사용합니다.
 - 루트의 `.env.example`은 현재 코드 기준 예시 변수 목록입니다.
 
 ## API
@@ -101,7 +101,7 @@ Content-Type: application/json
 
 | mode | event | 처리 |
 | --- | --- | --- |
-| `exercise` | `session_completed` | allow |
+| `exercise` | `session_completed` | 허용 |
 
 예시:
 
@@ -160,7 +160,13 @@ Content-Type: application/json
 }
 ```
 
-## Logs
+fallback 동작:
+
+- PC2는 fallback 시에도 raw plain text를 직접 반환하지 않습니다.
+- 항상 `CoachingResponse` JSON을 유지합니다.
+- fallback 모델이 한 줄 조언만 생성하면 `exercise_plan`은 빈 배열일 수 있고, `pc2_payload.message`에 한 줄 문장이 들어갑니다.
+
+## 로그 조회
 
 ```text
 GET /api/coach/logs/{user_id}?limit=10
@@ -172,14 +178,14 @@ DB에는 아래가 함께 저장됩니다.
 
 - PC3 입력 payload
 - 감지 신호
-- baseline snapshot
+- baseline 스냅샷
 - 검색된 분석 컨텍스트
-- LLM prompt
-- raw LLM response
+- LLM 프롬프트
+- 원본 LLM 응답
 - 최종 운동 계획 응답
 - PC2 화면 전달용 payload
 
-## Smoke Test
+## 점검 테스트
 
 기본 테스트:
 
