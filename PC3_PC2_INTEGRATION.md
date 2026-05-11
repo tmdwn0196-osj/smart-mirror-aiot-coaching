@@ -14,6 +14,7 @@ PC2는 PC3가 보낸 feature, 저장된 baseline, 로컬 운동 지식 검색 �
 - Baseline 저장: `POST http://<PC2_HOST>:7000/api/exercise/baseline`
 - 운동 계획 생성: `POST http://<PC2_HOST>:7000/api/coach/generate`
 - Health check: `GET http://<PC2_HOST>:7000/health`
+- Debug logs: `GET http://<PC2_HOST>:7000/api/coach/logs/{user_id}?limit=10`
 
 ## 호출 시점
 
@@ -58,6 +59,8 @@ PC3는 아래 데이터를 PC2로 보내지 않습니다.
 - camera stream URL
 
 PC2는 PC3가 계산한 수치형/상태형 feature만 받습니다.
+현재 PC2 요청 스키마는 계약에 없는 extra field를 허용하지 않습니다.
+즉 `landmarks`, `frame_path`뿐 아니라 명세에 없는 어떤 필드라도 들어오면 `422`로 거부됩니다.
 
 ## 1. Baseline 저장 요청
 
@@ -123,12 +126,23 @@ Content-Type: application/json
 - `features.exercise.posture_errors`
 - `features.exercise.knee_angle`
 - `features.exercise.back_angle`
-- `features.exercise.duration_sec`
+- `features.exercise.duration_sec` 또는 `duration_seconds`
 - `features.exercise.tempo`
 - `environment`
 - `purpose`
 
 `baseline_diff.exercise`는 PC3가 계산해서 넣어도 되고, 생략해도 됩니다. 생략 시 PC2가 저장된 baseline을 기준으로 내부 계산을 보완합니다.
+`environment`는 선택 필드입니다. 생략해도 운동 계획 생성은 가능합니다.
+
+`environment`에 허용되는 필드는 아래 3개입니다.
+
+- `temperature`
+- `humidity`
+- `illuminance`
+
+낮은 `illuminance`는 응답 `warnings`에 반영될 수 있습니다.
+높은 `humidity`는 로그의 `detected_signals`에 저장됩니다.
+baseline이 없는 사용자는 계획 생성이 실패하지 않고 `200`으로 처리되며, 응답 `warnings`에 baseline 없음 경고가 포함됩니다.
 
 ### JSON 예시
 
@@ -222,6 +236,9 @@ PC3에는 항상 JSON 응답을 반환하며, fallback 모델이 구조화된 �
 
 즉 PC3는 항상 JSON으로 받고, fallback 시에는 `pc2_payload.message`의 한 줄 문장을 우선 사용하면 됩니다.
 
+LLM 설정이 없거나 LLM 호출이 실패해도 PC2는 로컬 규칙 기반 fallback으로 응답을 생성할 수 있습니다.
+이 경우 `/health.status`는 `degraded`일 수 있지만, `/health.local_fallback.status`가 `ok`이면 PC2의 기본 운동 계획 생성 경로는 사용할 수 있습니다.
+
 ## 4. PC3에서 응답 활용 방식
 
 ### 서버 로직용
@@ -239,7 +256,39 @@ PC3에는 항상 JSON 응답을 반환하며, fallback 모델이 구조화된 �
 
 fallback 한 줄 응답일 때는 `pc2_payload.message`와 `display_lines[0]`이 같은 문장일 수 있습니다.
 
-## 5. Python 호출 예시
+## 5. 오류 응답 규칙
+
+PC3 요청이 계약과 맞지 않으면 PC2는 `422 Unprocessable Entity`를 반환합니다.
+
+대표적인 `422` 조건:
+
+- `event`가 `session_completed`가 아님
+- `features.exercise` 누락
+- `features.exercise.type` 누락
+- `features.exercise.type`이 지원 운동 5개 중 하나가 아님
+- `exercise_type`과 baseline `samples[*].type`이 다름
+- 계약에 없는 extra field 포함
+
+예시:
+
+```json
+{
+  "features": {
+    "exercise": {
+      "type": "squat",
+      "rep_count": 8,
+      "landmarks": []
+    }
+  }
+}
+```
+
+위 요청은 `landmarks`가 계약에 없는 필드이므로 `422 extra_forbidden`으로 거부됩니다.
+
+성공한 `/api/coach/generate` 요청은 coach log에 저장됩니다.
+요청 검증 단계에서 거부된 `422` 요청은 coach log에 남지 않을 수 있습니다.
+
+## 6. Python 호출 예시
 
 ```python
 import requests
@@ -272,15 +321,22 @@ resp.raise_for_status()
 result = resp.json()
 ```
 
-## 6. 연동 체크리스트
+## 7. 연동 체크리스트
 
-- PC2 서버 `/health`가 `ok`인지 확인
+- PC2 서버 `/health.status`가 `ok`인지 확인
+- `/health.status`가 `degraded`여도 `/health.local_fallback.status=ok`이면 LLM 없이 로컬 fallback으로 계획 생성 가능
 - PC3 환경변수에 `PC2_COACH_API_URL` 설정
 - baseline 저장 endpoint 먼저 연결
 - 계획 생성 endpoint는 세션 종료 시점에만 호출
 - `type`이 지원 운동 5개 중 하나인지 확인
 - 이미지/비디오/landmark 원본은 보내지 않음
+- 계약에 없는 extra field를 보내지 않음
+- `environment`는 선택 필드이며, 보낼 경우 `temperature`, `humidity`, `illuminance`만 사용
+- `rep_count`와 `count` 중 하나 이상을 보내는 것을 권장
+- `duration_sec`와 `duration_seconds` 중 하나를 사용할 수 있음
+- PC3 화면 표시는 `pc2_payload.message`를 우선 사용
+- 연동 중 문제 확인은 `GET /api/coach/logs/{user_id}?limit=10`으로 조회
 
-## 7. PC3 전달용 요약
+## 8. PC3 전달용 요약
 
 PC2는 정상 경로와 fallback 경로 모두에서 항상 `CoachingResponse` JSON을 반환합니다. fallback이 발생해도 raw plain text를 직접 반환하지 않으며, 한 줄 조언만 생성된 경우 그 문장을 `summary`, `priority`, `mirror_message`, `pc2_payload.message`, `pc2_payload.display_lines[0]`에 담아 최소 응답 형태로 내려보냅니다. 이 경우 `exercise_plan`은 빈 배열일 수 있으므로, PC3 화면 표시는 `pc2_payload.message`를 우선 사용하면 됩니다.
