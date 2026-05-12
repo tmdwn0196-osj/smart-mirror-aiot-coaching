@@ -26,6 +26,16 @@ def is_fallback_llm_configured() -> bool:
     return FALLBACK_LLM_ENABLED and bool(FALLBACK_LLM_BASE_URL.strip()) and bool(FALLBACK_LLM_MODEL_NAME.strip())
 
 
+def _health_timeout() -> httpx.Timeout:
+    return httpx.Timeout(
+        LLM_HEALTH_TIMEOUT_SECONDS,
+        connect=min(2.0, LLM_HEALTH_TIMEOUT_SECONDS),
+        read=LLM_HEALTH_TIMEOUT_SECONDS,
+        write=LLM_HEALTH_TIMEOUT_SECONDS,
+        pool=1.0,
+    )
+
+
 def _check_llm_health(base_url: str, api_key: str, model_name: str) -> dict:
     if not api_key.strip():
         return {
@@ -36,14 +46,7 @@ def _check_llm_health(base_url: str, api_key: str, model_name: str) -> dict:
         }
     models_url = base_url.rstrip("/") + "/models"
     try:
-        timeout = httpx.Timeout(
-            LLM_HEALTH_TIMEOUT_SECONDS,
-            connect=min(2.0, LLM_HEALTH_TIMEOUT_SECONDS),
-            read=LLM_HEALTH_TIMEOUT_SECONDS,
-            write=LLM_HEALTH_TIMEOUT_SECONDS,
-            pool=1.0,
-        )
-        with httpx.Client(timeout=timeout, trust_env=False) as client:
+        with httpx.Client(timeout=_health_timeout(), trust_env=False) as client:
             response = client.get(
                 models_url,
                 headers={"Authorization": f"Bearer {api_key}"},
@@ -58,11 +61,10 @@ def _check_llm_health(base_url: str, api_key: str, model_name: str) -> dict:
             "error": str(exc),
         }
 
-    model_ids = [
-        item.get("id")
-        for item in payload.get("data", [])
-        if isinstance(item, dict) and item.get("id")
-    ]
+    model_ids = []
+    for item in payload.get("data", []):
+        if isinstance(item, dict) and item.get("id"):
+            model_ids.append(item.get("id"))
     return {
         "status": "ok" if not model_ids or model_name in model_ids else "model_missing",
         "base_url": base_url,
@@ -130,17 +132,18 @@ def _call_openai_compatible(
 def call_primary_llm(system_prompt: str, user_prompt: str) -> dict:
     if not is_primary_llm_configured():
         raise RuntimeError("기본 LLM이 설정되어 있지 않습니다.")
+    content = _call_openai_compatible(
+        base_url=PRIMARY_LLM_BASE_URL,
+        api_key=PRIMARY_LLM_API_KEY,
+        model_name=PRIMARY_LLM_MODEL_NAME,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        max_tokens=LLM_MAX_TOKENS,
+        expect_json=True,
+        timeout_seconds=PRIMARY_LLM_TIMEOUT_SECONDS,
+    )
     return {
-        "content": _call_openai_compatible(
-            base_url=PRIMARY_LLM_BASE_URL,
-            api_key=PRIMARY_LLM_API_KEY,
-            model_name=PRIMARY_LLM_MODEL_NAME,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            max_tokens=LLM_MAX_TOKENS,
-            expect_json=True,
-            timeout_seconds=PRIMARY_LLM_TIMEOUT_SECONDS,
-        ),
+        "content": content,
         "served_by": "primary",
         "model_name": PRIMARY_LLM_MODEL_NAME,
         "fallback_used": False,
@@ -153,17 +156,18 @@ def call_fallback_llm(system_prompt: str, user_prompt: str, primary_error: str) 
         raise RuntimeError("보조 LLM이 비활성화되어 있습니다.")
     if not FALLBACK_LLM_API_KEY.strip():
         raise RuntimeError("보조 LLM이 설정되어 있지 않습니다.")
+    content = _call_openai_compatible(
+        base_url=FALLBACK_LLM_BASE_URL,
+        api_key=FALLBACK_LLM_API_KEY,
+        model_name=FALLBACK_LLM_MODEL_NAME,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        max_tokens=min(24, LLM_MAX_TOKENS),
+        expect_json=False,
+        timeout_seconds=FALLBACK_LLM_TIMEOUT_SECONDS,
+    )
     return {
-        "content": _call_openai_compatible(
-            base_url=FALLBACK_LLM_BASE_URL,
-            api_key=FALLBACK_LLM_API_KEY,
-            model_name=FALLBACK_LLM_MODEL_NAME,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            max_tokens=min(24, LLM_MAX_TOKENS),
-            expect_json=False,
-            timeout_seconds=FALLBACK_LLM_TIMEOUT_SECONDS,
-        ),
+        "content": content,
         "served_by": "fallback",
         "model_name": FALLBACK_LLM_MODEL_NAME,
         "fallback_used": True,

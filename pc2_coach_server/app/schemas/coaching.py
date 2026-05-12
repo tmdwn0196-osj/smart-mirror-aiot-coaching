@@ -144,3 +144,29 @@ class CoachingResponse(ContractModel):
     mirror_message: str
     warnings: list[str] = Field(default_factory=list)
     pc2_payload: PC2Payload
+
+
+class RoutineProfileRequest(ContractModel):
+    user_id: str
+    profile_name: str | None = None
+    weight_kg: float | None = Field(default=None, ge=1, le=500)
+    user_goal: str = Field(min_length=1)
+    exercise_experience: str = Field(min_length=1)
+    available_days_per_week: int = Field(ge=1, le=7)
+    restricted_body_parts: list[str] = Field(default_factory=list)
+    purpose: str | None = None
+
+
+class WeeklyRoutineDay(ContractModel):
+    day_index: int = Field(ge=1, le=7)
+    day_label: str
+    focus: str
+    exercises: list[ExercisePlanItem] = Field(default_factory=list)
+
+
+class RoutineProfileResponse(ContractModel):
+    summary: str
+    weekly_focus: str
+    weekly_routine: list[WeeklyRoutineDay] = Field(default_factory=list)
+    cautions: list[str] = Field(default_factory=list)
+    pc3_payload: dict = Field(default_factory=dict)

@@ -19,6 +19,7 @@ PC2가 다음을 정상 처리하는지 확인한다.
 - baseline 저장
 - 운동 계획 생성
 - fallback 처리
+- 프로필 기반 루틴 생성의 primary LLM 전용 실패 처리
 - 로그 저장
 - 입력 검증 실패 처리
 
@@ -259,6 +260,17 @@ curl -X POST http://127.0.0.1:7000/api/exercise/baseline \
 ../.venv/bin/python scripts/smoke_pc2.py --base-url http://127.0.0.1:7000
 ```
 
+현재 스모크 스크립트는 아래까지 자동으로 확인한다.
+
+- `/health`에서 `status`와 `local_fallback.status`
+- baseline 저장
+- PC3 mock payload 기준 계획 생성
+- 같은 `session_id` 재전송 시 로그의 `is_duplicate_session`, `duplicate_of_request_id`
+- 계약 밖 extra field 전송 시 `422`
+
+현재 스모크 스크립트는 `/api/routine/profile` 성공 경로를 자동 검증하지 않는다.
+이 endpoint는 primary LLM 전용이므로, `PRIMARY_LLM_API_KEY`가 없으면 `503` 실패가 정상 동작이다.
+
 ## 10. 테스트 우선순위
 
 권장 순서:
@@ -454,3 +466,33 @@ PC3 연결 직전 확인할 내용:
 - PC3가 원본 이미지, base64, landmark 배열, frame path를 보내지 않는지
 - PC3가 `Content-Type: application/json`으로 요청하는지
 - PC3가 fallback 상황에서도 `pc2_payload.message`를 우선 표시하는지
+
+### 12-11. 프로필 기반 루틴 생성
+
+PC1 프론트의 사용자 프로필 값을 PC3가 전달하는 흐름을 확인한다.
+
+```bash
+curl -X POST http://127.0.0.1:7000/api/routine/profile \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "user_id":"exercise_user",
+    "profile_name":"양하준",
+    "weight_kg":65,
+    "user_goal":"운동 습관 만들기",
+    "exercise_experience":"꾸준히 운동함",
+    "available_days_per_week":5,
+    "restricted_body_parts":[],
+    "purpose":"프로필 기반 주간 루틴 추천"
+  }'
+```
+
+기대 결과:
+
+- primary LLM이 설정되어 있고 응답 파싱에 성공하면 `200`
+- 응답은 `RoutineProfileResponse` JSON
+- `pc3_payload`는 PC3가 프론트에 그대로 넘길 수 있음
+- primary LLM 미설정이면 `503`과 `reason=primary_llm_unconfigured`
+- primary LLM 호출 실패 시 `503`과 `reason=primary_llm_call_failed`
+- primary LLM 응답 파싱 실패 시 `503`과 `reason=primary_llm_parse_failed`
+- 이 endpoint는 로컬 fallback 루틴을 생성하지 않음
+- 이 endpoint는 현재 coach log DB에 저장하지 않고 서버 로그에 성공/실패 사유만 남김

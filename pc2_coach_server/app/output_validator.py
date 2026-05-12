@@ -3,6 +3,7 @@ import re
 from typing import Any
 
 from app.schemas import CoachingResponse
+from app.schemas import RoutineProfileResponse
 
 
 def _strip_code_fence(text: str) -> str:
@@ -42,7 +43,6 @@ def _extract_json_object(text: str) -> dict[str, Any] | None:
                 return parsed if isinstance(parsed, dict) else None
     return None
 
-
 def _normalize_plan(plan: Any) -> list[dict[str, Any]]:
     if plan is None:
         return []
@@ -71,22 +71,28 @@ def _as_warning_list(value: Any) -> list[str]:
     if value is None:
         return []
     if isinstance(value, list):
-        return [str(item) for item in value if item]
+        items = []
+        for item in value:
+            if item:
+                items.append(str(item))
+        return items
     if isinstance(value, str) and value.strip():
         return [value.strip()]
     return []
-
 
 def _normalize_pc2_payload(parsed: dict[str, Any], summary: str, priority: str, mirror_message: str) -> dict[str, Any]:
     pc2_payload = parsed.get("pc2_payload")
     if isinstance(pc2_payload, dict):
         message = str(pc2_payload.get("message") or mirror_message or summary or priority or "").strip()
-        display_lines = [str(item) for item in pc2_payload.get("display_lines", []) if item]
-        if not display_lines and message:
-            display_lines = [message]
+        lines = []
+        for item in pc2_payload.get("display_lines", []):
+            if item:
+                lines.append(str(item))
+        if not lines and message:
+            lines = [message]
         return {
             "message": message,
-            "display_lines": display_lines[:3],
+            "display_lines": lines[:3],
         }
 
     message = mirror_message or summary or priority
@@ -113,6 +119,33 @@ def _has_meaningful_content(response: dict[str, Any]) -> bool:
     return False
 
 
+def _merge_warnings(base_response: dict[str, Any], parsed: dict[str, Any]) -> list[str]:
+    warnings: list[str] = []
+    items = []
+    items.extend(base_response.get("warnings", []) or [])
+    items.extend(_as_warning_list(parsed.get("warnings")))
+    for item in items:
+        text = str(item)
+        if text and text not in warnings:
+            warnings.append(text)
+    return warnings
+
+
+def _pick_summary(parsed: dict[str, Any]) -> str:
+    pc2_payload = parsed.get("pc2_payload")
+    message = ""
+    if isinstance(pc2_payload, dict):
+        message = pc2_payload.get("message") or ""
+    text = (
+        parsed.get("summary")
+        or parsed.get("mirror_message")
+        or parsed.get("priority")
+        or message
+        or ""
+    )
+    return str(text).strip()
+
+
 def parse_coaching_json(raw_text: str, base_response: dict[str, Any]) -> dict[str, Any]:
     parsed = _extract_json_object(raw_text) if raw_text else None
     if parsed is None:
@@ -126,20 +159,10 @@ def parse_coaching_json(raw_text: str, base_response: dict[str, Any]) -> dict[st
     if "mirror_message" not in parsed and "message" in parsed:
         parsed["mirror_message"] = parsed.get("message")
 
-    summary = str(
-        parsed.get("summary")
-        or parsed.get("mirror_message")
-        or parsed.get("priority")
-        or ((((parsed.get("pc2_payload") or {}) if isinstance(parsed.get("pc2_payload"), dict) else {})).get("message"))
-        or ""
-    ).strip()
+    summary = _pick_summary(parsed)
     priority = str(parsed.get("priority") or summary).strip()
     mirror_message = str(parsed.get("mirror_message") or summary or priority).strip()
-
-    warnings: list[str] = []
-    for item in [*(base_response.get("warnings", []) or []), *_as_warning_list(parsed.get("warnings"))]:
-        if item and str(item) not in warnings:
-            warnings.append(str(item))
+    warnings = _merge_warnings(base_response, parsed)
 
     merged = {
         "summary": summary,
@@ -156,3 +179,55 @@ def parse_coaching_json(raw_text: str, base_response: dict[str, Any]) -> dict[st
     if hasattr(CoachingResponse, "model_validate"):
         return CoachingResponse.model_validate(merged).model_dump()
     return CoachingResponse.parse_obj(merged).dict()
+
+
+def parse_profile_routine_json(raw_text: str, base_response: dict[str, Any]) -> dict[str, Any]:
+    parsed = _extract_json_object(raw_text) if raw_text else None
+    if parsed is None:
+        raise ValueError("LLM 응답에서 JSON 객체를 찾지 못했습니다.")
+
+    if "RoutineProfileResponse" in parsed and isinstance(parsed.get("RoutineProfileResponse"), dict):
+        parsed = parsed["RoutineProfileResponse"]
+
+    summary = str(parsed.get("summary") or "").strip()
+    weekly_focus = str(parsed.get("weekly_focus") or summary).strip()
+
+    weekly_routine: list[dict[str, Any]] = []
+    for day in parsed.get("weekly_routine", []):
+        if not isinstance(day, dict):
+            raise ValueError("weekly_routine item은 객체여야 합니다.")
+        weekly_routine.append(
+            {
+                "day_index": int(day.get("day_index") or 0),
+                "day_label": str(day.get("day_label") or ""),
+                "focus": str(day.get("focus") or ""),
+                "exercises": _normalize_plan(day.get("exercises")),
+            }
+        )
+
+    cautions = _as_warning_list(parsed.get("cautions"))
+    base_cautions = _as_warning_list(base_response.get("cautions"))
+    merged_cautions: list[str] = []
+    for item in [*base_cautions, *cautions]:
+        if item and item not in merged_cautions:
+            merged_cautions.append(item)
+
+    pc3_payload = parsed.get("pc3_payload")
+    if not isinstance(pc3_payload, dict):
+        pc3_payload = {
+            "summary": summary,
+            "weekly_focus": weekly_focus,
+            "weekly_routine": weekly_routine,
+        }
+
+    merged = {
+        "summary": summary,
+        "weekly_focus": weekly_focus,
+        "weekly_routine": weekly_routine,
+        "cautions": merged_cautions,
+        "pc3_payload": pc3_payload,
+    }
+
+    if hasattr(RoutineProfileResponse, "model_validate"):
+        return RoutineProfileResponse.model_validate(merged).model_dump()
+    return RoutineProfileResponse.parse_obj(merged).dict()

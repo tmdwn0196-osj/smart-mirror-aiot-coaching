@@ -7,7 +7,7 @@
 1. [README.md](/home/osj/smart-mirror-aiot-coaching/pc2_coach_server/README.md)
    서비스 개요와 실행 방법
 2. [pc3_payload_request.md](/home/osj/smart-mirror-aiot-coaching/pc2_coach_server/docs/pc3_payload_request.md)
-   PC3 -> PC2 요청/응답 명세
+   PC3 -> PC2 운동 계획 및 프로필 루틴 요청/응답 명세
 3. [pc2_integration_guide.md](/home/osj/smart-mirror-aiot-coaching/pc2_coach_server/docs/pc2_integration_guide.md)
    연동 흐름 요약
 4. [pc2_prompt_contract.md](/home/osj/smart-mirror-aiot-coaching/pc2_coach_server/docs/pc2_prompt_contract.md)

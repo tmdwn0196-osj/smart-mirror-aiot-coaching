@@ -40,6 +40,57 @@ class PC2ApiTests(unittest.TestCase):
     def tearDown(self):
         self.tmpdir.cleanup()
 
+    def _pc3_payload(self, **overrides):
+        payload = {
+            "user_id": "pc3_user",
+            "session_id": "pc3_session_001",
+            "mode": "exercise",
+            "event": "session_completed",
+            "features": {
+                "exercise": {
+                    "type": "squat",
+                    "count": 8,
+                    "rep_count": 8,
+                    "state": "down",
+                    "stability_score": 0.64,
+                    "posture_errors": ["knees_caving_in"],
+                    "squat_depth": 0.49,
+                    "knee_angle": 118,
+                    "back_angle": "forward",
+                    "duration_sec": 42,
+                    "tempo": "fast",
+                }
+            },
+            "baseline_diff": {
+                "exercise": {
+                    "count_change": -3,
+                    "stability_change": -0.05,
+                }
+            },
+            "environment": {
+                "temperature": 24.5,
+                "humidity": 48,
+                "illuminance": 360,
+            },
+            "purpose": "하체 루틴 자세 점검 후 다음 운동 계획 생성",
+        }
+        payload.update(overrides)
+        return payload
+
+    def _profile_payload(self, **overrides):
+        payload = {
+            "user_id": "profile_user",
+            "profile_name": "양하준",
+            "weight_kg": 65,
+            "user_goal": "운동 습관 만들기",
+            "exercise_experience": "꾸준히 운동함",
+            "available_days_per_week": 5,
+            "restricted_body_parts": [],
+            "purpose": "프로필 기반 주간 루틴 추천",
+        }
+        payload.update(overrides)
+        return payload
+
     def test_create_baseline(self):
         response = self.main.create_exercise_baseline(
             self.main.ExerciseBaselineCreateRequest(
@@ -223,6 +274,58 @@ class PC2ApiTests(unittest.TestCase):
             self.main.coach_logs("u1", limit=0)
         self.assertEqual(ctx.exception.status_code, 422)
 
+    def test_duplicate_session_id_is_marked_in_logs(self):
+        payload = self.schemas.FeaturePayload(
+            user_id="u_dup",
+            session_id="dup-session-1",
+            mode="exercise",
+            event="session_completed",
+            features=self.schemas.FeatureBundle(
+                exercise=self.schemas.ExerciseFeature(
+                    type="pushup",
+                    rep_count=5,
+                    stability_score=0.6,
+                    back_angle="forward",
+                    duration_sec=20,
+                    tempo="fast",
+                )
+            ),
+        )
+
+        self.main.generate_coaching(payload)
+        self.main.generate_coaching(payload)
+
+        logs = self.main.coach_logs("u_dup", limit=10)
+        self.assertEqual(len(logs["logs"]), 2)
+
+        latest = logs["logs"][0]
+        original = logs["logs"][1]
+        self.assertTrue(latest["is_duplicate_session"])
+        self.assertEqual(latest["duplicate_of_request_id"], original["request_id"])
+        self.assertFalse(original["is_duplicate_session"])
+        self.assertIsNone(original["duplicate_of_request_id"])
+
+    def test_pc3_contract_payload_dict_is_accepted(self):
+        payload = self.schemas.FeaturePayload(**self._pc3_payload())
+        response = self.main.generate_coaching(payload)
+        self.assertIn("summary", response)
+        self.assertIn("pc2_payload", response)
+        self.assertEqual(response["pc2_payload"]["message"], str(response["pc2_payload"]["message"]))
+
+    def test_pc3_contract_rejects_extra_field(self):
+        bad_payload = self._pc3_payload()
+        bad_payload["features"]["exercise"]["landmarks"] = []
+
+        with self.assertRaises(ValidationError) as ctx:
+            self.schemas.FeaturePayload(**bad_payload)
+        self.assertIn("landmarks", str(ctx.exception))
+
+    def test_health_allows_degraded_with_local_fallback_ok(self):
+        health = self.main.health()
+        self.assertEqual(health["status"], "degraded")
+        self.assertEqual(health["local_fallback"]["status"], "ok")
+        self.assertIn(health["primary_llm"]["status"], {"unconfigured", "unhealthy", "model_missing"})
+
     def test_parse_coaching_json_accepts_partial_fields(self):
         raw = '{"summary":"요약","priority":"무릎 정렬","plan":[{"exercise":"tempo squat","sets":3,"reps":6,"focus":"천천히","reason":"정렬 우선"}],"message":"천천히 진행하세요!"}'
         parsed = parse_coaching_json(raw, {"warnings": []})
@@ -244,6 +347,75 @@ class PC2ApiTests(unittest.TestCase):
         self.assertEqual(parsed["priority"], "무릎 정렬")
         self.assertEqual(parsed["exercise_plan"][0]["exercise"], "Tempo Squat")
         self.assertEqual(parsed["pc2_payload"]["message"], "템포 조절부터 시작")
+
+    def test_generate_profile_routine_success_with_mocked_llm(self):
+        llm_result = {
+            "content": '{"summary":"운동 습관 형성을 위한 주간 루틴입니다.","weekly_focus":"주 5회 리듬 유지와 전신 밸런스 확보","weekly_routine":[{"day_index":1,"day_label":"Day 1","focus":"하체와 코어","exercises":[{"exercise":"goblet squat","sets":4,"reps":10,"duration_sec":null,"rest_sec":75,"focus":"하체 안정성","reason":"기초 하체 근력 유지에 적합합니다."}]},{"day_index":2,"day_label":"Day 2","focus":"상체 밀기","exercises":[{"exercise":"incline push-up","sets":3,"reps":12,"duration_sec":null,"rest_sec":60,"focus":"상체 볼륨 확보","reason":"주간 빈도를 유지하기 좋은 난이도입니다."}]}],"cautions":["통증이 있으면 강도를 낮추세요."],"pc3_payload":{"summary":"운동 습관 형성을 위한 주간 루틴입니다.","weekly_focus":"주 5회 리듬 유지와 전신 밸런스 확보","available_days_per_week":5,"restricted_body_parts":[],"weekly_routine":[{"day_index":1,"day_label":"Day 1","focus":"하체와 코어","exercises":[{"exercise":"goblet squat","sets":4,"reps":10,"duration_sec":null,"rest_sec":75,"focus":"하체 안정성","reason":"기초 하체 근력 유지에 적합합니다."}]}]}}',
+            "served_by": "primary",
+            "model_name": "mock-model",
+            "fallback_used": False,
+            "primary_error": None,
+        }
+
+        with patch("app.services.is_primary_llm_configured", return_value=True), patch(
+            "app.services.call_primary_llm", return_value=llm_result
+        ):
+            response = self.main.generate_profile_routine(
+                self.main.RoutineProfileRequest(**self._profile_payload())
+            )
+
+        self.assertEqual(response["weekly_focus"], "주 5회 리듬 유지와 전신 밸런스 확보")
+        self.assertEqual(response["weekly_routine"][0]["exercises"][0]["exercise"], "goblet squat")
+        self.assertEqual(response["pc3_payload"]["available_days_per_week"], 5)
+
+    def test_generate_profile_routine_requires_primary_llm(self):
+        with self.assertRaises(HTTPException) as ctx:
+            self.main.generate_profile_routine(
+                self.main.RoutineProfileRequest(**self._profile_payload())
+            )
+        self.assertEqual(ctx.exception.status_code, 503)
+        self.assertEqual(ctx.exception.detail["reason"], "primary_llm_unconfigured")
+
+    def test_generate_profile_routine_primary_failure_returns_503(self):
+        with patch("app.services.is_primary_llm_configured", return_value=True), patch(
+            "app.services.call_primary_llm", side_effect=RuntimeError("forced failure")
+        ):
+            with self.assertRaises(HTTPException) as ctx:
+                self.main.generate_profile_routine(
+                    self.main.RoutineProfileRequest(
+                        **self._profile_payload(restricted_body_parts=["무릎", "어깨"])
+                    )
+                )
+
+        self.assertEqual(ctx.exception.status_code, 503)
+        self.assertEqual(ctx.exception.detail["message"], "루틴 생성에 실패했습니다.")
+        self.assertEqual(ctx.exception.detail["reason"], "primary_llm_call_failed")
+
+    def test_generate_profile_routine_parse_failure_returns_503(self):
+        llm_result = {
+            "content": "not-json",
+            "served_by": "primary",
+            "model_name": "mock-model",
+            "fallback_used": False,
+            "primary_error": None,
+        }
+        with patch("app.services.is_primary_llm_configured", return_value=True), patch(
+            "app.services.call_primary_llm", return_value=llm_result
+        ):
+            with self.assertRaises(HTTPException) as ctx:
+                self.main.generate_profile_routine(
+                    self.main.RoutineProfileRequest(
+                        **self._profile_payload(restricted_body_parts=["무릎", "어깨"])
+                    )
+                )
+
+        self.assertEqual(ctx.exception.status_code, 503)
+        self.assertEqual(ctx.exception.detail["reason"], "primary_llm_parse_failed")
+
+    def test_profile_routine_request_rejects_invalid_days(self):
+        with self.assertRaises(ValidationError) as ctx:
+            self.main.RoutineProfileRequest(**self._profile_payload(available_days_per_week=8))
+        self.assertIn("available_days_per_week", str(ctx.exception))
 
 
 if __name__ == "__main__":

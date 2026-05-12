@@ -4,7 +4,8 @@
 
 ## 1. PC2가 하는 일
 
-PC2는 `exercise` 전용 운동 계획 생성 서버입니다.
+PC2는 운동 세션 기반 계획 생성과 프로필 기반 주간 루틴 생성을 담당하는 서버입니다.
+운동 세션 기반 계획 생성은 `exercise` 전용입니다.
 
 역할은 다음과 같습니다.
 
@@ -13,6 +14,7 @@ PC2는 `exercise` 전용 운동 계획 생성 서버입니다.
 - 현재 운동 상태와 baseline 차이를 계산함
 - 로컬 운동 지식 컨텍스트를 검색함
 - LLM 또는 로컬 규칙 기반 fallback으로 운동 계획표를 생성함
+- PC1 사용자 프로필 값을 받아 primary LLM으로 주간 루틴 JSON을 생성함
 - 결과를 DB에 기록하고 PC3에 JSON으로 반환함
 
 현재 지원 운동 타입은 아래 5개입니다.
@@ -57,7 +59,7 @@ PC2는 `exercise` 전용 운동 계획 생성 서버입니다.
 
 ```bash
 cd /home/osj/smart-mirror-aiot-coaching/pc2_coach_server
-cp ../.env.example .env
+cp .env.example .env
 ./scripts/run_pc2.sh
 ```
 
@@ -81,7 +83,8 @@ curl http://127.0.0.1:7000/health
 - `.env`가 없어도 실행 가능
 - 값이 비어 있으면 안전한 기본값 사용
 - 숫자형 env가 잘못되어도 기본값으로 복구
-- LLM 설정이 없거나 호출 실패 시 로컬 규칙 기반 fallback 사용
+- `/api/coach/generate`는 LLM 설정이 없거나 호출 실패 시 로컬 규칙 기반 fallback 사용
+- `/api/routine/profile`은 primary LLM 전용이며 실패 시 `503` 반환
 
 기본값 예시:
 
@@ -94,7 +97,7 @@ curl http://127.0.0.1:7000/health
 
 권장:
 
-- 루트의 `.env.example`을 복사해 `pc2_coach_server/.env`로 사용
+- `pc2_coach_server/.env.example`을 복사해 `pc2_coach_server/.env`로 사용
 - legacy 변수(`NVIDIA_API_KEY`, `LLM_*`, `VLLM_*`)는 호환용으로만 사용
 
 ## 5. LLM이 없어도 동작하는 방식
@@ -117,6 +120,13 @@ curl http://127.0.0.1:7000/health
 
 `/health`에서는 `local_fallback.status = ok`가 함께 표시됩니다.
 
+주의:
+
+- 보조 fallback LLM 경로는 한 줄 문장 중심의 최소 응답을 반환할 수 있음
+- 로컬 규칙 기반 fallback 경로는 보통 `exercise_plan`을 포함한 계획 응답을 반환함
+- 이 fallback 보장은 `/api/coach/generate`에만 해당함
+- `/api/routine/profile`은 primary LLM 설정/호출/파싱 실패 시 로컬 루틴을 만들지 않고 `503`을 반환함
+
 ## 6. API 목록
 
 ### 6-1. baseline 저장
@@ -137,7 +147,30 @@ GET /api/exercise/baseline/{user_id}?exercise_type=squat
 POST /api/coach/generate
 ```
 
-### 6-4. 로그 조회
+### 6-4. 프로필 기반 주간 루틴 생성
+
+```http
+POST /api/routine/profile
+```
+
+필수 입력:
+
+- `user_id`
+- `user_goal`
+- `exercise_experience`
+- `available_days_per_week`
+
+선택 입력:
+
+- `profile_name`
+- `weight_kg`
+- `restricted_body_parts`
+- `purpose`
+
+이 endpoint는 primary LLM 전용입니다.
+primary LLM이 없거나 호출/파싱에 실패하면 `503`과 `detail.reason`을 반환합니다.
+
+### 6-5. 로그 조회
 
 ```http
 GET /api/coach/logs/{user_id}?limit=10
@@ -145,7 +178,7 @@ GET /api/coach/logs/{user_id}?limit=10
 
 - `limit`는 `1` 이상 `100` 이하
 
-### 6-5. 상태 확인
+### 6-6. 상태 확인
 
 ```http
 GET /health
@@ -155,11 +188,13 @@ GET /health
 
 PC3는 원본 이미지가 아니라 구조화된 운동 feature만 PC2로 보냅니다.
 
-호출 규칙:
+운동 계획 생성 호출 규칙:
 
 - `mode`는 항상 `exercise`
 - `event`는 항상 `session_completed`
+- `user_id`는 필수
 - `features.exercise`와 `features.exercise.type`을 반드시 포함
+- 나머지 `features.exercise` 세부 측정값, `baseline_diff.exercise`, `environment`, `purpose`는 선택
 - 실시간 프레임마다 호출하지 않음
 - 세션 종료 시점에 1회 호출
 
@@ -188,6 +223,28 @@ PC3는 원본 이미지가 아니라 구조화된 운동 feature만 PC2로 보�
 }
 ```
 
+프로필 기반 루틴 생성 호출 규칙:
+
+- PC1 프론트의 사용자 목표, 운동 경험, 주당 운동 가능 횟수, 제한 부위를 PC3가 그대로 전달
+- `POST /api/routine/profile` 사용
+- `features.exercise`, `mode`, `event`는 보내지 않음
+- 실패 시 fallback 응답이 아니라 `503` 오류 JSON을 받음
+
+요청 예시:
+
+```json
+{
+  "user_id": "exercise_user",
+  "profile_name": "양하준",
+  "weight_kg": 65,
+  "user_goal": "운동 습관 만들기",
+  "exercise_experience": "꾸준히 운동함",
+  "available_days_per_week": 5,
+  "restricted_body_parts": [],
+  "purpose": "프로필 기반 주간 루틴 추천"
+}
+```
+
 ## 8. PC2 응답 방식
 
 PC2는 다음 정보를 반환합니다.
@@ -201,9 +258,20 @@ PC2는 다음 정보를 반환합니다.
 
 `pc2_payload`는 미러/화면 표시용으로 바로 쓸 수 있습니다.
 
+`/api/routine/profile`은 다음 정보를 반환합니다.
+
+- `summary`
+- `weekly_focus`
+- `weekly_routine`
+- `cautions`
+- `pc3_payload`
+
+`pc3_payload`는 PC3가 프론트에 그대로 넘길 수 있는 루틴 표시용 payload입니다.
+
 ## 9. DB에 저장되는 내용
 
-PC2는 생성 이력을 SQLite에 저장합니다.
+PC2는 `/api/coach/generate` 생성 이력을 SQLite에 저장합니다.
+`/api/routine/profile`은 현재 coach log DB에 저장하지 않고 서버 로그에 성공/실패 사유만 남깁니다.
 
 저장 항목:
 
@@ -215,6 +283,9 @@ PC2는 생성 이력을 SQLite에 저장합니다.
 - raw LLM response
 - 최종 응답
 - PC2 표시용 payload
+- duplicate session 표시 (`is_duplicate_session`, `duplicate_of_request_id`)
+
+같은 `user_id + session_id`가 재전송되면 요청은 그대로 처리되며, 로그에서만 중복 여부를 구분합니다.
 
 ## 10. 스모크 테스트
 

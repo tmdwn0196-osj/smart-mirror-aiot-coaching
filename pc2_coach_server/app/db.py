@@ -36,6 +36,8 @@ coach_logs = Table(
     Column("llm_route", String(32), nullable=True),
     Column("fallback_used", Integer, nullable=True),
     Column("primary_error", Text, nullable=True),
+    Column("is_duplicate_session", Integer, nullable=True),
+    Column("duplicate_of_request_id", String(128), nullable=True),
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
 
@@ -66,6 +68,15 @@ def _loads(value: str | None, default: Any = None) -> Any:
     return json.loads(value)
 
 
+def _add_col(conn, cols: set[str], name: str, sql_type: str, default: str | None = None) -> None:
+    if name in cols:
+        return
+    sql = f"ALTER TABLE coach_logs ADD COLUMN {name} {sql_type}"
+    if default is not None:
+        sql += f" NOT NULL DEFAULT '{default}'"
+    conn.exec_driver_sql(sql)
+
+
 def init_db() -> None:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     metadata.create_all(engine)
@@ -74,36 +85,53 @@ def init_db() -> None:
 
 def _ensure_coach_log_columns() -> None:
     with engine.begin() as conn:
-        columns = {
-            row[1]
-            for row in conn.exec_driver_sql("PRAGMA table_info(coach_logs)").fetchall()
-        }
-        if "rag_evidence_json" not in columns:
-            conn.exec_driver_sql(
-                "ALTER TABLE coach_logs ADD COLUMN rag_evidence_json TEXT NOT NULL DEFAULT '[]'"
-            )
-        if "analysis_context_json" not in columns:
-            conn.exec_driver_sql(
-                "ALTER TABLE coach_logs ADD COLUMN analysis_context_json TEXT NOT NULL DEFAULT '[]'"
-            )
-            if "rag_evidence_json" in columns:
+        cols = set()
+        for row in conn.exec_driver_sql("PRAGMA table_info(coach_logs)").fetchall():
+            cols.add(row[1])
+
+        _add_col(conn, cols, "rag_evidence_json", "TEXT", "[]")
+        if "rag_evidence_json" not in cols:
+            cols.add("rag_evidence_json")
+
+        if "analysis_context_json" not in cols:
+            _add_col(conn, cols, "analysis_context_json", "TEXT", "[]")
+            if "rag_evidence_json" in cols:
                 conn.exec_driver_sql(
                     "UPDATE coach_logs SET analysis_context_json = COALESCE(rag_evidence_json, '[]')"
                 )
-        if "baseline_snapshot_json" not in columns:
-            conn.exec_driver_sql(
-                "ALTER TABLE coach_logs ADD COLUMN baseline_snapshot_json TEXT NOT NULL DEFAULT '{}'"
-            )
-        if "pc2_output_json" not in columns:
-            conn.exec_driver_sql(
-                "ALTER TABLE coach_logs ADD COLUMN pc2_output_json TEXT NOT NULL DEFAULT '{}'"
-            )
-        if "llm_route" not in columns:
-            conn.exec_driver_sql("ALTER TABLE coach_logs ADD COLUMN llm_route TEXT")
-        if "fallback_used" not in columns:
-            conn.exec_driver_sql("ALTER TABLE coach_logs ADD COLUMN fallback_used INTEGER")
-        if "primary_error" not in columns:
-            conn.exec_driver_sql("ALTER TABLE coach_logs ADD COLUMN primary_error TEXT")
+            cols.add("analysis_context_json")
+
+        _add_col(conn, cols, "baseline_snapshot_json", "TEXT", "{}")
+        _add_col(conn, cols, "pc2_output_json", "TEXT", "{}")
+        _add_col(conn, cols, "llm_route", "TEXT")
+        _add_col(conn, cols, "fallback_used", "INTEGER")
+        _add_col(conn, cols, "primary_error", "TEXT")
+        _add_col(conn, cols, "is_duplicate_session", "INTEGER")
+        _add_col(conn, cols, "duplicate_of_request_id", "TEXT")
+
+
+def find_existing_session_log(user_id: str, session_id: str | None) -> dict[str, Any] | None:
+    if not session_id:
+        return None
+
+    init_db()
+    stmt = (
+        select(coach_logs)
+        .where(coach_logs.c.user_id == user_id)
+        .where(coach_logs.c.session_id == session_id)
+        .order_by(coach_logs.c.created_at.asc())
+        .limit(1)
+    )
+    with engine.begin() as conn:
+        row = conn.execute(stmt).fetchone()
+    if row is None:
+        return None
+
+    data = dict(row._mapping)
+    return {
+        "request_id": data["request_id"],
+        "created_at": data["created_at"].isoformat() if data.get("created_at") else None,
+    }
 
 
 def save_exercise_baseline(
@@ -141,14 +169,13 @@ def get_latest_baseline(user_id: str, exercise_type: str | None = None) -> dict[
         return None
 
     data = dict(row._mapping)
-    created_at = data.get("created_at")
     return {
         "baseline_id": data["baseline_id"],
         "user_id": data["user_id"],
         "exercise_type": data["exercise_type"],
         "purpose": data["purpose"],
         "baseline_profile": _loads(data["baseline_profile_json"], default={}),
-        "created_at": created_at.isoformat() if created_at else None,
+        "created_at": data["created_at"].isoformat() if data.get("created_at") else None,
     }
 
 
@@ -171,6 +198,8 @@ def save_coach_log(
     llm_route: str | None = None,
     fallback_used: bool | None = None,
     primary_error: str | None = None,
+    is_duplicate_session: bool | None = None,
+    duplicate_of_request_id: str | None = None,
 ) -> None:
     init_db()
     with engine.begin() as conn:
@@ -194,6 +223,8 @@ def save_coach_log(
                 llm_route=llm_route,
                 fallback_used=int(fallback_used) if fallback_used is not None else None,
                 primary_error=primary_error,
+                is_duplicate_session=int(is_duplicate_session) if is_duplicate_session is not None else None,
+                duplicate_of_request_id=duplicate_of_request_id,
                 created_at=_now(),
             )
         )
@@ -213,7 +244,9 @@ def get_logs_by_user(user_id: str, limit: int = 10) -> list[dict[str, Any]]:
     logs: list[dict[str, Any]] = []
     for row in rows:
         data = dict(row._mapping)
-        created_at = data.get("created_at")
+        context_raw = data.get("analysis_context_json") or data.get("rag_evidence_json")
+        fallback_used = data.get("fallback_used")
+        is_duplicate_session = data.get("is_duplicate_session")
         logs.append(
             {
                 "id": data["id"],
@@ -223,18 +256,17 @@ def get_logs_by_user(user_id: str, limit: int = 10) -> list[dict[str, Any]]:
                 "mode": data["mode"],
                 "purpose": data["goal"],
                 "detected_signals": _loads(data["detected_signals_json"], default=[]),
-                "analysis_context": _loads(
-                    data.get("analysis_context_json") or data.get("rag_evidence_json"),
-                    default=[],
-                ),
+                "analysis_context": _loads(context_raw, default=[]),
                 "baseline_snapshot": _loads(data.get("baseline_snapshot_json"), default={}),
                 "pc2_output": _loads(data.get("pc2_output_json"), default={}),
                 "final_response": _loads(data["final_response_json"], default={}),
                 "model_name": data["model_name"],
                 "llm_route": data.get("llm_route"),
-                "fallback_used": bool(data["fallback_used"]) if data.get("fallback_used") is not None else None,
+                "fallback_used": bool(fallback_used) if fallback_used is not None else None,
                 "primary_error": data.get("primary_error"),
-                "created_at": created_at.isoformat() if created_at else None,
+                "is_duplicate_session": bool(is_duplicate_session) if is_duplicate_session is not None else False,
+                "duplicate_of_request_id": data.get("duplicate_of_request_id"),
+                "created_at": data["created_at"].isoformat() if data.get("created_at") else None,
             }
         )
     return logs

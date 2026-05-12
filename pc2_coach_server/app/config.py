@@ -11,43 +11,46 @@ load_dotenv(BASE_DIR / ".env")
 
 
 def _env(name: str, default: str) -> str:
-    value = os.getenv(name)
-    if value is None:
+    raw = os.getenv(name)
+    if raw is None:
         return default
-    value = value.strip()
+    value = raw.strip()
     return value if value else default
 
 
 def _env_chain(names: list[str], default: str) -> str:
     for name in names:
-        value = os.getenv(name)
-        if value is None:
+        raw = os.getenv(name)
+        if raw is None:
             continue
-        value = value.strip()
+        value = raw.strip()
         if value:
             return value
     return default
 
 
 def _env_bool(name: str, default: bool) -> bool:
-    value = os.getenv(name)
-    if value is None or not value.strip():
+    raw = os.getenv(name)
+    if raw is None:
         return default
-    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    value = raw.strip()
+    if not value:
+        return default
+    return value.lower() in {"1", "true", "yes", "y", "on"}
 
 
 def _env_int(names: list[str], default: int) -> int:
-    value = _env_chain(names, str(default))
+    raw = _env_chain(names, str(default))
     try:
-        return int(value)
+        return int(raw)
     except ValueError:
         return default
 
 
 def _env_float(names: list[str], default: float) -> float:
-    value = _env_chain(names, str(default))
+    raw = _env_chain(names, str(default))
     try:
-        return float(value)
+        return float(raw)
     except ValueError:
         return default
 

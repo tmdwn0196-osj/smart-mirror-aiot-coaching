@@ -1,20 +1,30 @@
 # PC2 연결 가이드
 
-이 문서는 현재 `exercise` 전용 PC2 운동 계획 API를 PC3 Vision Gateway에 연결할 때 필요한 엔드포인트, payload, 응답 규칙을 정리합니다.
+이 문서는 PC2 Coach API를 PC3 Vision Gateway에 연결할 때 필요한 엔드포인트, payload, 응답 규칙을 정리합니다.
 
 ## 연결 방향
 
 ```text
-PC1 -> PC3 Vision Gateway -> PC2 운동 계획 API
+PC1 -> PC3 Vision Gateway -> PC2 Coach API
 ```
 
-PC2는 PC3에서 전달하는 운동 `FeaturePayload`만 받아 운동 계획표 JSON을 생성합니다.
+PC2는 PC3에서 전달하는 운동 `FeaturePayload`를 받아 운동 계획표 JSON을 생성합니다.
 PC2는 저장된 baseline과 로컬 운동 지식 검색 결과를 함께 사용합니다.
+PC1 프론트의 사용자 프로필 값은 PC3를 거쳐 `/api/routine/profile`로 전달되며, primary LLM으로 주간 루틴 JSON을 생성합니다.
 
 ## 엔드포인트
 
+운동 계획 생성:
+
 ```http
 POST /api/coach/generate
+Content-Type: application/json
+```
+
+프로필 기반 주간 루틴 생성:
+
+```http
+POST /api/routine/profile
 Content-Type: application/json
 ```
 
@@ -22,6 +32,7 @@ PC3 설정:
 
 ```env
 PC2_COACH_API_URL=http://<PC2_HOST>:7000/api/coach/generate
+PC2_ROUTINE_PROFILE_API_URL=http://<PC2_HOST>:7000/api/routine/profile
 ```
 
 ## 실행 구조
@@ -41,6 +52,22 @@ Coach API
 ## 입력: FeaturePayload
 
 PC2는 원본 이미지를 받지 않습니다. 입력은 반드시 `FeaturePayload` JSON 하나입니다.
+
+필수 필드:
+
+- `user_id`
+- `event`
+- `features.exercise`
+- `features.exercise.type`
+
+선택 필드:
+
+- `session_id`
+- `mode` (`exercise` 기본값)
+- `baseline_diff.exercise`
+- `environment`
+- `purpose`
+- 그 외 `features.exercise` 내부 세부 측정값들 (`count`, `rep_count`, `state`, `stability_score`, `posture_errors`, `squat_depth`, `knee_angle`, `back_angle`, `duration_sec`, `duration_seconds`, `tempo`)
 
 지원 운동 타입:
 
@@ -130,7 +157,7 @@ PC2는 반드시 `CoachingResponse` JSON만 반환합니다.
 ```
 
 보조 LLM fallback 시에도 응답 형식은 그대로 `CoachingResponse` JSON입니다.
-이때 구조화된 운동 계획 대신 한 줄 문장을 최소 응답으로 채워 반환할 수 있습니다.
+현재 구현 기준으로 fallback LLM이 사용되면 구조화된 운동 계획 대신 한 줄 문장을 최소 응답으로 채워 반환합니다.
 
 ```json
 {
@@ -148,6 +175,65 @@ PC2는 반드시 `CoachingResponse` JSON만 반환합니다.
 }
 ```
 
+반면 로컬 규칙 기반 fallback이 사용되면 응답은 계속 `CoachingResponse` JSON이며, 보통 `exercise_plan`을 포함한 계획 응답으로 내려갑니다.
+
+## 입력: RoutineProfileRequest
+
+프로필 기반 루틴 생성은 운동 feature를 받지 않습니다.
+PC3는 PC1 프론트에서 받은 프로필 값을 아래 형식으로 전달합니다.
+
+필수 필드:
+
+- `user_id`
+- `user_goal`
+- `exercise_experience`
+- `available_days_per_week`
+
+선택 필드:
+
+- `profile_name`
+- `weight_kg`
+- `restricted_body_parts`
+- `purpose`
+
+예시:
+
+```json
+{
+  "user_id": "exercise_user",
+  "profile_name": "양하준",
+  "weight_kg": 65,
+  "user_goal": "운동 습관 만들기",
+  "exercise_experience": "꾸준히 운동함",
+  "available_days_per_week": 5,
+  "restricted_body_parts": [],
+  "purpose": "프로필 기반 주간 루틴 추천"
+}
+```
+
+## 출력: RoutineProfileResponse
+
+```json
+{
+  "summary": "string",
+  "weekly_focus": "string",
+  "weekly_routine": [
+    {
+      "day_index": 1,
+      "day_label": "Day 1",
+      "focus": "string",
+      "exercises": []
+    }
+  ],
+  "cautions": ["string"],
+  "pc3_payload": {}
+}
+```
+
+`pc3_payload`는 PC3가 프론트에 그대로 전달할 수 있는 루틴 표시용 payload입니다.
+이 endpoint는 primary LLM 전용이며, primary LLM 미설정/호출 실패/파싱 실패 시 `503`을 반환합니다.
+로컬 fallback 루틴은 생성하지 않습니다.
+
 ## PC2 호출 시점
 
 | mode | event | PC2 호출 여부 |
@@ -157,3 +243,5 @@ PC2는 반드시 `CoachingResponse` JSON만 반환합니다.
 운동 실시간 count/state/feedback은 PC3가 직접 처리합니다. PC2는 세션 종료 후 최종 계획 생성만 담당합니다.
 
 PC3가 화면에 바로 표시할 때는 `pc2_payload.message`를 우선 사용하면 됩니다.
+`/api/coach/generate`에서 같은 `user_id + session_id`가 재전송되면 요청은 계속 처리되고, `/api/coach/logs/{user_id}` 결과에서 `is_duplicate_session`와 `duplicate_of_request_id`로 중복 여부를 확인할 수 있습니다.
+`/api/routine/profile`은 현재 coach log DB에 저장하지 않고 서버 로그에 성공/실패 사유만 남깁니다.

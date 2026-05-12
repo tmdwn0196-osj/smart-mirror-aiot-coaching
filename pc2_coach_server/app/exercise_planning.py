@@ -99,17 +99,65 @@ def _round(value: float | None, digits: int = 3) -> float | None:
 
 
 def _average(values: list[float | None]) -> float | None:
-    filtered = [value for value in values if value is not None]
-    if not filtered:
+    vals = []
+    for value in values:
+        if value is not None:
+            vals.append(value)
+    if not vals:
         return None
-    return sum(filtered) / len(filtered)
+    return sum(vals) / len(vals)
 
 
 def _mode(values: list[str]) -> str | None:
-    filtered = [value for value in values if value]
-    if not filtered:
+    vals = []
+    for value in values:
+        if value:
+            vals.append(value)
+    if not vals:
         return None
-    return Counter(filtered).most_common(1)[0][0]
+    return Counter(vals).most_common(1)[0][0]
+
+
+def _avg_attr(samples: list[ExerciseFeature], name: str) -> float | None:
+    vals = []
+    for sample in samples:
+        vals.append(_num(getattr(sample, name)))
+    return _average(vals)
+
+
+def _mode_back(samples: list[ExerciseFeature]) -> str | None:
+    vals = []
+    for sample in samples:
+        if sample.back_angle is not None:
+            vals.append(str(sample.back_angle).lower())
+    return _mode(vals)
+
+
+def _mode_tempo(samples: list[ExerciseFeature]) -> str | None:
+    vals = []
+    for sample in samples:
+        if sample.tempo:
+            vals.append(str(sample.tempo).lower())
+    return _mode(vals)
+
+
+def _top_errs(samples: list[ExerciseFeature]) -> list[str]:
+    counts: Counter[str] = Counter()
+    for sample in samples:
+        for item in sample.posture_errors:
+            if item:
+                counts.update([str(item)])
+
+    items = []
+    for item, _ in counts.most_common(3):
+        items.append(item)
+    return items
+
+
+def _diff_val(now: float | None, base: float | None) -> float | None:
+    if now is None or base is None:
+        return None
+    return _round(now - base)
 
 
 def _exercise_type_from_payload(payload: FeaturePayload) -> str:
@@ -119,40 +167,47 @@ def _exercise_type_from_payload(payload: FeaturePayload) -> str:
 
 
 def build_baseline_profile(exercise_type: str, samples: list[ExerciseFeature]) -> ExerciseBaselineProfile:
-    rep_avg = _average(
-        [_num(sample.rep_count if sample.rep_count is not None else sample.count) for sample in samples]
-    )
-    duration_avg = _average(
-        [_num(sample.duration_sec if sample.duration_sec is not None else sample.duration_seconds) for sample in samples]
-    )
-    stability_avg = _average([_num(sample.stability_score) for sample in samples])
-    knee_avg = _average([_num(sample.knee_angle) for sample in samples])
-    depth_avg = _average([_num(sample.squat_depth) for sample in samples])
-    back_mode = _mode([str(sample.back_angle).lower() for sample in samples if sample.back_angle is not None])
-    tempo_mode = _mode([str(sample.tempo).lower() for sample in samples if sample.tempo])
-
-    error_counter: Counter[str] = Counter()
+    rep_values = []
+    duration_values = []
+    back_values = []
+    tempo_values = []
     for sample in samples:
-        error_counter.update(str(item) for item in sample.posture_errors if item)
+        rep_count = sample.rep_count if sample.rep_count is not None else sample.count
+        duration = sample.duration_sec if sample.duration_sec is not None else sample.duration_seconds
+        rep_values.append(_num(rep_count))
+        duration_values.append(_num(duration))
+        if sample.back_angle is not None:
+            back_values.append(str(sample.back_angle).lower())
+        if sample.tempo:
+            tempo_values.append(str(sample.tempo).lower())
 
-    recommended_sets = 4 if (stability_avg or 0) >= 0.8 else 3
-    recommended_reps = max(6, min(15, int(round(rep_avg or 8))))
-    recommended_duration = max(20, min(180, int(round(duration_avg or 45))))
+    rep_avg = _average(rep_values)
+    dur_avg = _average(duration_values)
+    stab_avg = _avg_attr(samples, "stability_score")
+    knee_avg = _avg_attr(samples, "knee_angle")
+    depth_avg = _avg_attr(samples, "squat_depth")
+    back_mode = _mode(back_values)
+    tempo_mode = _mode(tempo_values)
+    top_errs = _top_errs(samples)
+
+    rec_sets = 4 if (stab_avg or 0) >= 0.8 else 3
+    rec_reps = max(6, min(15, int(round(rep_avg or 8))))
+    rec_dur = max(20, min(180, int(round(dur_avg or 45))))
 
     return ExerciseBaselineProfile(
         exercise_type=exercise_type.lower(),
         sample_count=len(samples),
         rep_count_avg=_round(rep_avg),
-        duration_sec_avg=_round(duration_avg),
-        stability_score_avg=_round(stability_avg),
+        duration_sec_avg=_round(dur_avg),
+        stability_score_avg=_round(stab_avg),
         knee_angle_avg=_round(knee_avg),
         squat_depth_avg=_round(depth_avg),
         back_angle_mode=back_mode,
         tempo_mode=tempo_mode,
-        frequent_posture_errors=[item for item, _ in error_counter.most_common(3)],
-        recommended_sets=recommended_sets,
-        recommended_reps=recommended_reps,
-        recommended_duration_sec=recommended_duration,
+        frequent_posture_errors=top_errs,
+        recommended_sets=rec_sets,
+        recommended_reps=rec_reps,
+        recommended_duration_sec=rec_dur,
     )
 
 
@@ -163,18 +218,20 @@ def build_baseline_diff(
     if feature is None or baseline is None:
         return ExerciseBaselineDiff()
 
-    rep_count = _num(feature.rep_count if feature.rep_count is not None else feature.count)
-    duration = _num(feature.duration_sec if feature.duration_sec is not None else feature.duration_seconds)
+    rep_count = feature.rep_count if feature.rep_count is not None else feature.count
+    duration = feature.duration_sec if feature.duration_sec is not None else feature.duration_seconds
+    rep_count = _num(rep_count)
+    duration = _num(duration)
     stability = _num(feature.stability_score)
     knee_angle = _num(feature.knee_angle)
-    depth = _num(feature.squat_depth)
+    squat_depth = _num(feature.squat_depth)
 
     return ExerciseBaselineDiff(
-        count_change=_round(rep_count - baseline.rep_count_avg) if rep_count is not None and baseline.rep_count_avg is not None else None,
-        stability_change=_round(stability - baseline.stability_score_avg) if stability is not None and baseline.stability_score_avg is not None else None,
-        knee_angle_change=_round(knee_angle - baseline.knee_angle_avg) if knee_angle is not None and baseline.knee_angle_avg is not None else None,
-        squat_depth_change=_round(depth - baseline.squat_depth_avg) if depth is not None and baseline.squat_depth_avg is not None else None,
-        duration_change=_round(duration - baseline.duration_sec_avg) if duration is not None and baseline.duration_sec_avg is not None else None,
+        count_change=_diff_val(rep_count, baseline.rep_count_avg),
+        stability_change=_diff_val(stability, baseline.stability_score_avg),
+        knee_angle_change=_diff_val(knee_angle, baseline.knee_angle_avg),
+        squat_depth_change=_diff_val(squat_depth, baseline.squat_depth_avg),
+        duration_change=_diff_val(duration, baseline.duration_sec_avg),
     )
 
 
@@ -184,7 +241,9 @@ def retrieve_analysis_context(
     baseline: ExerciseBaselineProfile | None,
 ) -> list[dict[str, Any]]:
     exercise_type = _exercise_type_from_payload(payload)
-    categories = {str(item.get("category")) for item in signal_dicts}
+    categories = set()
+    for item in signal_dicts:
+        categories.add(str(item.get("category")))
     contexts: list[dict[str, Any]] = []
 
     if baseline is not None:
@@ -205,16 +264,17 @@ def retrieve_analysis_context(
             }
         )
 
-    scored_entries: list[tuple[int, dict[str, Any]]] = []
+    scored_items: list[tuple[int, dict[str, Any]]] = []
     for entry in KNOWLEDGE_BASE:
         score = 0
         if exercise_type in entry["exercise_types"]:
             score += 3
         score += len(categories.intersection(entry["signal_categories"])) * 2
         if score > 0:
-            scored_entries.append((score, entry))
+            scored_items.append((score, entry))
 
-    for _, entry in sorted(scored_entries, key=lambda item: item[0], reverse=True)[:3]:
+    top_items = sorted(scored_items, key=lambda item: item[0], reverse=True)[:3]
+    for _, entry in top_items:
         contexts.append(
             {
                 "source": "rag_knowledge",

@@ -16,6 +16,9 @@ from app.schemas.coaching import (
     FeatureBundle,
     FeaturePayload,
     PC2Payload,
+    RoutineProfileRequest,
+    RoutineProfileResponse,
+    WeeklyRoutineDay,
 )
 
 __all__ = [
@@ -36,4 +39,7 @@ __all__ = [
     "FeatureBundle",
     "FeaturePayload",
     "PC2Payload",
+    "RoutineProfileRequest",
+    "RoutineProfileResponse",
+    "WeeklyRoutineDay",
 ]
