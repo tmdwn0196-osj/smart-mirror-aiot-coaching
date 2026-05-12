@@ -243,7 +243,8 @@ PC3는 PC1 프론트에서 받은 프로필 값을 아래 형식으로 전달합
 }
 ```
 
-`pc3_payload`는 PC3가 프론트에 그대로 전달할 수 있는 루틴 표시용 payload입니다.
+`pc3_payload`는 PC2가 top-level 루틴 결과와 요청값을 기준으로 재구성한 루틴 표시용 payload입니다.
+즉 `summary`, `weekly_focus`, `weekly_routine`는 top-level 응답과 일치하고, `available_days_per_week`, `restricted_body_parts`는 요청값이 반영됩니다.
 이 endpoint는 primary LLM 전용이며, primary LLM 미설정/호출 실패/파싱 실패 시 `503`을 반환합니다.
 로컬 fallback 루틴은 생성하지 않습니다.
 

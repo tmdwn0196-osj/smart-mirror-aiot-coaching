@@ -81,6 +81,27 @@ def _normalize_routine_plan(plan: Any) -> list[dict[str, Any]]:
     return normalized
 
 
+def _normalize_weekly_routine(value: Any) -> list[dict[str, Any]]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError("weekly_routine은 배열이어야 합니다.")
+
+    weekly_routine: list[dict[str, Any]] = []
+    for day in value:
+        if not isinstance(day, dict):
+            raise ValueError("weekly_routine item은 객체여야 합니다.")
+        weekly_routine.append(
+            {
+                "day_index": int(day.get("day_index") or 0),
+                "day_label": str(day.get("day_label") or ""),
+                "focus": str(day.get("focus") or ""),
+                "exercises": _normalize_routine_plan(day.get("exercises")),
+            }
+        )
+    return weekly_routine
+
+
 def _as_warning_list(value: Any) -> list[str]:
     if value is None:
         return []
@@ -205,19 +226,7 @@ def parse_profile_routine_json(raw_text: str, base_response: dict[str, Any]) -> 
 
     summary = str(parsed.get("summary") or "").strip()
     weekly_focus = str(parsed.get("weekly_focus") or summary).strip()
-
-    weekly_routine: list[dict[str, Any]] = []
-    for day in parsed.get("weekly_routine", []):
-        if not isinstance(day, dict):
-            raise ValueError("weekly_routine item은 객체여야 합니다.")
-        weekly_routine.append(
-            {
-                "day_index": int(day.get("day_index") or 0),
-                "day_label": str(day.get("day_label") or ""),
-                "focus": str(day.get("focus") or ""),
-                "exercises": _normalize_routine_plan(day.get("exercises")),
-            }
-        )
+    weekly_routine = _normalize_weekly_routine(parsed.get("weekly_routine"))
 
     cautions = _as_warning_list(parsed.get("cautions"))
     base_cautions = _as_warning_list(base_response.get("cautions"))
@@ -228,24 +237,21 @@ def parse_profile_routine_json(raw_text: str, base_response: dict[str, Any]) -> 
 
     request_available_days = base_response.get("available_days_per_week")
     request_restricted_parts = base_response.get("restricted_body_parts") or []
-    pc3_payload = parsed.get("pc3_payload")
-    if not isinstance(pc3_payload, dict):
-        pc3_payload = {}
+    if not summary:
+        raise ValueError("프로필 루틴 응답에는 summary가 필요합니다.")
+    if not weekly_focus:
+        raise ValueError("프로필 루틴 응답에는 weekly_focus가 필요합니다.")
+    if not weekly_routine:
+        raise ValueError("프로필 루틴 응답에는 최소 1일 이상의 weekly_routine이 필요합니다.")
+    if request_available_days is not None and len(weekly_routine) > int(request_available_days):
+        raise ValueError("weekly_routine 일수는 available_days_per_week 이하여야 합니다.")
 
     merged_pc3_payload = {
-        "summary": str(pc3_payload.get("summary") or summary).strip(),
-        "weekly_focus": str(pc3_payload.get("weekly_focus") or weekly_focus).strip(),
-        "available_days_per_week": (
-            int(pc3_payload.get("available_days_per_week"))
-            if pc3_payload.get("available_days_per_week") is not None
-            else request_available_days
-        ),
-        "restricted_body_parts": (
-            pc3_payload.get("restricted_body_parts")
-            if isinstance(pc3_payload.get("restricted_body_parts"), list)
-            else request_restricted_parts
-        ),
-        "weekly_routine": pc3_payload.get("weekly_routine") if isinstance(pc3_payload.get("weekly_routine"), list) else weekly_routine,
+        "summary": summary,
+        "weekly_focus": weekly_focus,
+        "available_days_per_week": request_available_days,
+        "restricted_body_parts": request_restricted_parts,
+        "weekly_routine": weekly_routine,
     }
 
     merged = {

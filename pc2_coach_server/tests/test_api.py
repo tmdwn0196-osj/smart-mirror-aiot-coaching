@@ -392,6 +392,39 @@ class PC2ApiTests(unittest.TestCase):
         self.assertEqual(parsed["pc3_payload"]["restricted_body_parts"], ["무릎"])
         self.assertEqual(parsed["pc3_payload"]["weekly_focus"], "하체 안정성 유지")
         self.assertEqual(parsed["pc3_payload"]["weekly_routine"][0]["day_label"], "Day 1")
+        self.assertEqual(parsed["pc3_payload"]["weekly_routine"], parsed["weekly_routine"])
+
+    def test_parse_profile_routine_json_rejects_empty_routine_response(self):
+        raw = '{"summary":"","weekly_focus":"","weekly_routine":[],"cautions":[]}'
+        with self.assertRaises(ValueError) as ctx:
+            parse_profile_routine_json(
+                raw,
+                {
+                    "cautions": [],
+                    "available_days_per_week": 4,
+                    "restricted_body_parts": [],
+                },
+            )
+        self.assertIn("summary", str(ctx.exception))
+
+    def test_parse_profile_routine_json_rejects_excess_days(self):
+        raw = (
+            '{"summary":"주간 루틴입니다.","weekly_focus":"하체 안정성 유지",'
+            '"weekly_routine":['
+            '{"day_index":1,"day_label":"Day 1","focus":"하체와 코어","exercises":[{"exercise":"squat","sets":3,"reps":12,"rest_sec":60,"focus":"둔근 활성화","reason":"무릎 부담을 줄입니다."}]},'
+            '{"day_index":2,"day_label":"Day 2","focus":"상체","exercises":[{"exercise":"pushup","sets":3,"reps":10,"rest_sec":60,"focus":"상체 안정성","reason":"기초 상체 근력 유지에 적합합니다."}]}'
+            '],"cautions":[]}'
+        )
+        with self.assertRaises(ValueError) as ctx:
+            parse_profile_routine_json(
+                raw,
+                {
+                    "cautions": [],
+                    "available_days_per_week": 1,
+                    "restricted_body_parts": [],
+                },
+            )
+        self.assertIn("available_days_per_week", str(ctx.exception))
 
     def test_parse_profile_routine_json_rejects_non_exercise_type_name(self):
         raw = (

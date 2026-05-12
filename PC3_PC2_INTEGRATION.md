@@ -353,7 +353,7 @@ primary LLM이 설정되지 않았거나 호출/응답 파싱에 실패하면 �
 | `weight_kg` | 체중 | kg 단위 숫자입니다. 선택 값이며 1~500 범위만 허용됩니다. |
 | `user_goal` | 사용자 목표 | 예: `체중 감량`, `근력 향상`, `운동 습관 만들기`. 루틴 방향을 결정하는 핵심 값입니다. |
 | `exercise_experience` | 운동 경험 수준/설명 | 예: `초보`, `가끔 운동함`, `꾸준히 운동함`. 볼륨과 난이도 조절에 사용합니다. |
-| `available_days_per_week` | 주당 운동 가능 횟수 | 1~7만 허용합니다. 프롬프트는 이 값을 기준으로 루틴 일수를 맞추도록 요청하지만, 현재 parser가 응답 길이를 강제 검증하지는 않습니다. |
+| `available_days_per_week` | 주당 운동 가능 횟수 | 1~7만 허용합니다. PC2는 응답 `weekly_routine` 일수가 이 값을 초과하면 파싱 실패로 처리합니다. |
 | `restricted_body_parts` | 제한 부위 배열 | 예: `["무릎", "허리"]`. 없으면 `[]`로 보내는 것을 권장합니다. 해당 부위 부담을 낮추는 데 사용합니다. |
 | `purpose` | 호출 목적 설명 | 로그와 프롬프트 참고용 선택 값입니다. |
 
@@ -428,13 +428,13 @@ primary LLM이 설정되지 않았거나 호출/응답 파싱에 실패하면 �
 | --- | --- | --- |
 | `summary` | 루틴 전체 요약 | 프론트 상단 요약 문구로 사용합니다. |
 | `weekly_focus` | 이번 주 핵심 방향 | 주간 목표/초점 문구로 표시합니다. |
-| `weekly_routine` | 일자별 루틴 배열 | 프롬프트는 `available_days_per_week` 기준으로 생성을 요청하지만, 현재 코드가 응답 길이를 강제 검증하지는 않습니다. |
+| `weekly_routine` | 일자별 루틴 배열 | 최소 1일 이상이어야 하며, 일수는 `available_days_per_week`를 초과할 수 없습니다. |
 | `weekly_routine[].day_index` | 루틴 일차 번호 | 1~7 범위입니다. UI 정렬 기준으로 사용합니다. |
 | `weekly_routine[].day_label` | 화면 표시용 일차 라벨 | 예: `Day 1`, `1일차`. |
 | `weekly_routine[].focus` | 해당 일차의 운동 초점 | 카드 제목 또는 설명으로 사용합니다. |
 | `weekly_routine[].exercises` | 해당 일차 운동 목록 | 기존 `exercise_plan` item과 같은 구조입니다. |
 | `cautions` | 제한 부위 관련 주의사항 | 사용자에게 주의 문구로 표시합니다. |
-| `pc3_payload` | PC3/프론트 전달용 payload | LLM이 함께 내려주면 그대로 전달할 수 있습니다. 다만 현재 parser는 `pc3_payload`가 비어 있을 때 `summary`, `weekly_focus`, `weekly_routine`만 기본 보완하고, `available_days_per_week`, `restricted_body_parts`는 자동 보완하지 않습니다. |
+| `pc3_payload` | PC3/프론트 전달용 payload | PC2 parser가 top-level 루틴 결과와 요청값을 기준으로 일관되게 재구성합니다. |
 
 PC3는 이 응답에서 `pc3_payload`를 그대로 프론트에 넘기거나, `summary`, `weekly_focus`, `weekly_routine`, `cautions`만 골라서 가공해도 됩니다.
 현재 이 endpoint는 `/api/coach/logs/{user_id}` 조회 대상이 아니며, 성공/실패 사유는 PC2 서버 로그에 남습니다.
@@ -479,6 +479,7 @@ fallback 한 줄 응답일 때는 `pc2_payload.message`와 `display_lines[0]`이
 ### 프로필 루틴 응답
 
 PC3는 `pc3_payload`를 프론트에 그대로 전달할 수 있습니다.
+이 값은 LLM 원문을 그대로 신뢰하는 것이 아니라, PC2가 검증한 top-level 루틴 결과에서 다시 만든 payload입니다.
 필요하면 아래 top-level 필드만 골라 가공해도 됩니다.
 
 - `summary`
