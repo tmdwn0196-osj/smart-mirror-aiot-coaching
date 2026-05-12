@@ -162,6 +162,56 @@ Content-Type: application/json
 높은 `humidity`는 로그의 `detected_signals`에 저장됩니다.
 baseline이 없는 사용자는 계획 생성이 실패하지 않고 `200`으로 처리되며, 응답 `warnings`에 baseline 없음 경고가 포함됩니다.
 
+### 운동 계획 요청 변수 의미
+
+Top-level:
+
+| 변수 | 의미 | PC3 작성 기준 |
+| --- | --- | --- |
+| `user_id` | 사용자 식별자 | PC1/PC3에서 사용하는 동일 사용자 ID를 전달합니다. |
+| `session_id` | 운동 세션 식별자 | 같은 운동 세션 재전송 여부를 로그에서 구분하는 값입니다. 가능하면 세션마다 고유하게 전달합니다. |
+| `mode` | 요청 모드 | 운동 계획 생성은 `exercise`만 사용합니다. 생략하면 `exercise`로 처리됩니다. |
+| `event` | 호출 이벤트 | 세션 종료 후 `session_completed`만 허용합니다. 실시간 프레임 이벤트는 보내지 않습니다. |
+| `features.exercise` | PC3가 계산한 운동 분석 결과 | 원본 이미지나 landmark가 아니라 최종 수치/상태 feature만 담습니다. |
+| `baseline_diff.exercise` | 현재 세션과 baseline의 차이 | PC3가 이미 계산했다면 전달합니다. 생략하면 PC2가 저장된 baseline으로 보완합니다. |
+| `environment` | 센서/환경 정보 | 조도, 습도, 온도 같은 선택 값입니다. 없어도 계획 생성은 가능합니다. |
+| `purpose` | 호출 목적 설명 | 로그와 프롬프트 참고용입니다. 기능 분기에는 사용하지 않습니다. |
+
+`features.exercise`:
+
+| 변수 | 의미 | PC3 작성 기준 |
+| --- | --- | --- |
+| `type` | 운동 타입 | `squat`, `jumping_jack`, `knee_raise`, `lunge`, `pushup` 중 하나만 허용합니다. |
+| `count` | 반복 횟수 | PC3 카운터 기준 반복 수입니다. `rep_count`와 둘 중 하나 이상 전달을 권장합니다. |
+| `rep_count` | 반복 횟수 | `count`와 같은 의미입니다. 둘 다 보낼 경우 같은 값으로 맞추는 것을 권장합니다. |
+| `state` | 종료 시점 대표 상태 | 예: `up`, `down`, `ready`. PC2는 문자열로 참고만 합니다. |
+| `stability_score` | 자세 안정도 점수 | 0~1 범위 사용을 권장하며, 높을수록 안정적인 상태로 해석합니다. |
+| `posture_errors` | 자세 오류 코드 배열 | 예: `knees_caving_in`, `back_forward`. PC3 내부 오류 코드를 문자열 배열로 보냅니다. |
+| `squat_depth` | 스쿼트 깊이 지표 | 스쿼트에서 사용하는 정규화 지표입니다. 같은 사용자/baseline 비교가 가능하도록 같은 산식으로 보내야 합니다. |
+| `knee_angle` | 무릎 각도 | 각도 단위 숫자입니다. 자세 오류와 강도 조절 참고에 사용합니다. |
+| `back_angle` | 상체/등 상태 | 예: `neutral`, `forward`. 문자열 상태값으로 전달합니다. |
+| `duration_sec` | 세션 또는 동작 지속 시간 | 초 단위 숫자입니다. |
+| `duration_seconds` | 세션 또는 동작 지속 시간 | `duration_sec`와 같은 의미입니다. 둘 중 하나만 사용해도 됩니다. |
+| `tempo` | 운동 속도/리듬 | 예: `slow`, `controlled`, `fast`. 속도 조절 피드백에 사용합니다. |
+
+`baseline_diff.exercise`:
+
+| 변수 | 의미 |
+| --- | --- |
+| `count_change` | 현재 반복 수 - baseline 반복 수 |
+| `stability_change` | 현재 안정도 - baseline 안정도 |
+| `knee_angle_change` | 현재 무릎 각도 - baseline 무릎 각도 |
+| `squat_depth_change` | 현재 깊이 - baseline 깊이 |
+| `duration_change` | 현재 지속 시간 - baseline 지속 시간 |
+
+`environment`:
+
+| 변수 | 의미 |
+| --- | --- |
+| `temperature` | 온도 |
+| `humidity` | 습도 |
+| `illuminance` | 조도. 낮으면 비전 feature 신뢰도 경고에 반영될 수 있습니다. |
+
 ### JSON 예시
 
 ```json
@@ -231,6 +281,18 @@ baseline이 없는 사용자는 계획 생성이 실패하지 않고 `200`으로
 }
 ```
 
+### 운동 계획 응답 변수 의미
+
+| 변수 | 의미 | PC3 사용 기준 |
+| --- | --- | --- |
+| `summary` | 현재 세션 분석과 계획 방향 요약 | 서버 로직/화면 요약에 사용합니다. |
+| `priority` | 가장 먼저 교정할 포인트 | 운동 자세 우선순위 표시용입니다. |
+| `exercise_plan` | 다음 운동 계획 배열 | 각 item의 운동명, 세트, 반복/시간, 휴식, 이유를 표시할 수 있습니다. fallback 시 비어 있을 수 있습니다. |
+| `mirror_message` | 미러에 바로 표시할 짧은 문장 | 화면 표시용 한 줄 메시지로 사용 가능합니다. |
+| `warnings` | 불확실성 또는 주의 경고 | baseline 없음, 낮은 조도 같은 조건을 사용자/로그에 표시할 때 사용합니다. |
+| `pc2_payload.message` | PC2/미러 표시용 대표 문장 | fallback까지 고려하면 PC3 화면 표시는 이 값을 우선 사용하면 됩니다. |
+| `pc2_payload.display_lines` | 화면용 짧은 지시문 배열 | UI에서 2~3줄 핵심 지시로 표시할 수 있습니다. |
+
 ### 보조 LLM fallback 응답 규칙
 
 fallback 경로에서도 PC2는 raw plain text를 직접 반환하지 않습니다.
@@ -281,6 +343,19 @@ primary LLM이 설정되지 않았거나 호출/응답 파싱에 실패하면 �
 - `available_days_per_week`: 주당 운동 가능 횟수, 1~7
 - `restricted_body_parts`: 제한 부위 배열, 없으면 `[]`
 - `purpose`: 호출 목적, 선택
+
+### 프로필 루틴 요청 변수 의미
+
+| 변수 | 의미 | PC3 작성 기준 |
+| --- | --- | --- |
+| `user_id` | 사용자 식별자 | PC1/PC3에서 사용하는 동일 사용자 ID를 전달합니다. |
+| `profile_name` | 사용자 표시 이름 | 루틴 생성 참고용 선택 값입니다. 없어도 됩니다. |
+| `weight_kg` | 체중 | kg 단위 숫자입니다. 선택 값이며 1~500 범위만 허용됩니다. |
+| `user_goal` | 사용자 목표 | 예: `체중 감량`, `근력 향상`, `운동 습관 만들기`. 루틴 방향을 결정하는 핵심 값입니다. |
+| `exercise_experience` | 운동 경험 수준/설명 | 예: `초보`, `가끔 운동함`, `꾸준히 운동함`. 볼륨과 난이도 조절에 사용합니다. |
+| `available_days_per_week` | 주당 운동 가능 횟수 | 1~7만 허용합니다. 루틴은 이 값과 같거나 더 적은 일수로 생성됩니다. |
+| `restricted_body_parts` | 제한 부위 배열 | 예: `["무릎", "허리"]`. 없으면 `[]`로 보내는 것을 권장합니다. 해당 부위 부담을 낮추는 데 사용합니다. |
+| `purpose` | 호출 목적 설명 | 로그와 프롬프트 참고용 선택 값입니다. |
 
 ### JSON 예시
 
@@ -348,6 +423,20 @@ primary LLM이 설정되지 않았거나 호출/응답 파싱에 실패하면 �
   }
 }
 ```
+
+### 프로필 루틴 응답 변수 의미
+
+| 변수 | 의미 | PC3 사용 기준 |
+| --- | --- | --- |
+| `summary` | 루틴 전체 요약 | 프론트 상단 요약 문구로 사용합니다. |
+| `weekly_focus` | 이번 주 핵심 방향 | 주간 목표/초점 문구로 표시합니다. |
+| `weekly_routine` | 일자별 루틴 배열 | 최대 `available_days_per_week`개까지 내려올 수 있습니다. |
+| `weekly_routine[].day_index` | 루틴 일차 번호 | 1~7 범위입니다. UI 정렬 기준으로 사용합니다. |
+| `weekly_routine[].day_label` | 화면 표시용 일차 라벨 | 예: `Day 1`, `1일차`. |
+| `weekly_routine[].focus` | 해당 일차의 운동 초점 | 카드 제목 또는 설명으로 사용합니다. |
+| `weekly_routine[].exercises` | 해당 일차 운동 목록 | 기존 `exercise_plan` item과 같은 구조입니다. |
+| `cautions` | 제한 부위 관련 주의사항 | 사용자에게 주의 문구로 표시합니다. |
+| `pc3_payload` | PC3/프론트 전달용 payload | PC3가 별도 가공 없이 프론트에 전달할 수 있는 구조입니다. |
 
 PC3는 이 응답에서 `pc3_payload`를 그대로 프론트에 넘기거나, `summary`, `weekly_focus`, `weekly_routine`, `cautions`만 골라서 가공해도 됩니다.
 현재 이 endpoint는 `/api/coach/logs/{user_id}` 조회 대상이 아니며, 성공/실패 사유는 PC2 서버 로그에 남습니다.

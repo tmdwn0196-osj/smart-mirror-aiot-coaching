@@ -96,6 +96,48 @@ Content-Type: application/json
 - `environment`
 - `purpose`
 
+### 계획표 생성 변수 의미
+
+Top-level:
+
+| 변수 | 의미 | PC3 작성 기준 |
+| --- | --- | --- |
+| `user_id` | 사용자 식별자 | PC1/PC3에서 쓰는 동일 사용자 ID |
+| `session_id` | 운동 세션 식별자 | 중복 요청 로그 표시 기준. 세션마다 고유값 권장 |
+| `mode` | 요청 모드 | 운동 계획 생성은 `exercise` |
+| `event` | 호출 이벤트 | 세션 종료 후 `session_completed`만 허용 |
+| `features.exercise` | 운동 분석 feature | 원본 이미지/landmark 제외, PC3가 계산한 수치와 상태만 포함 |
+| `baseline_diff.exercise` | baseline 대비 변화량 | PC3가 계산했으면 전달, 생략하면 PC2가 저장 baseline으로 보완 |
+| `environment` | 환경 센서 값 | 온도, 습도, 조도 선택 전달 |
+| `purpose` | 호출 목적 | 로그와 프롬프트 참고용 |
+
+`features.exercise`:
+
+| 변수 | 의미 |
+| --- | --- |
+| `type` | 운동 타입. `squat`, `jumping_jack`, `knee_raise`, `lunge`, `pushup` 중 하나 |
+| `count` | PC3 카운터 기준 반복 수 |
+| `rep_count` | 반복 수. `count`와 같은 의미이며 둘 다 보낼 경우 같은 값 권장 |
+| `state` | 종료 시점 대표 운동 상태 |
+| `stability_score` | 자세 안정도. 0~1 범위 사용 권장, 높을수록 안정 |
+| `posture_errors` | 자세 오류 코드 문자열 배열 |
+| `squat_depth` | 스쿼트 깊이 정규화 지표. 같은 산식 유지 필요 |
+| `knee_angle` | 무릎 각도 |
+| `back_angle` | 상체/등 상태 문자열 |
+| `duration_sec` | 초 단위 지속 시간 |
+| `duration_seconds` | `duration_sec`와 같은 의미 |
+| `tempo` | 운동 속도/리듬 |
+
+`baseline_diff.exercise`:
+
+| 변수 | 의미 |
+| --- | --- |
+| `count_change` | 현재 반복 수 - baseline 반복 수 |
+| `stability_change` | 현재 안정도 - baseline 안정도 |
+| `knee_angle_change` | 현재 무릎 각도 - baseline 무릎 각도 |
+| `squat_depth_change` | 현재 깊이 - baseline 깊이 |
+| `duration_change` | 현재 지속 시간 - baseline 지속 시간 |
+
 요청 예시:
 
 ```json
@@ -147,6 +189,18 @@ Content-Type: application/json
 }
 ```
 
+응답 변수 의미:
+
+| 변수 | 의미 | PC3 사용 기준 |
+| --- | --- | --- |
+| `summary` | 현재 세션 분석과 계획 방향 요약 | 화면 요약 또는 서버 로직 참고 |
+| `priority` | 가장 먼저 교정할 포인트 | 자세 우선순위 표시 |
+| `exercise_plan` | 다음 운동 계획 배열 | fallback 시 빈 배열 가능 |
+| `mirror_message` | 미러 표시용 짧은 문장 | 화면 표시용 |
+| `warnings` | baseline 없음, 낮은 조도 등 경고 | 사용자/로그 표시 |
+| `pc2_payload.message` | 대표 표시 문장 | PC3 화면 표시에서 우선 사용 권장 |
+| `pc2_payload.display_lines` | 짧은 지시문 배열 | UI 핵심 지시로 사용 |
+
 fallback 경로에서도 PC2는 raw plain text를 직접 반환하지 않습니다.
 항상 `CoachingResponse` JSON을 유지합니다.
 현재 구현 기준으로 fallback LLM 응답은 구조화된 계획 대신 아래와 같은 최소 응답으로 정규화됩니다.
@@ -191,6 +245,21 @@ Content-Type: application/json
 - `restricted_body_parts` (`[]` 권장)
 - `purpose`
 
+### 프로필 루틴 변수 의미
+
+요청:
+
+| 변수 | 의미 | PC3 작성 기준 |
+| --- | --- | --- |
+| `user_id` | 사용자 식별자 | PC1/PC3에서 쓰는 동일 사용자 ID |
+| `profile_name` | 사용자 표시 이름 | 선택 값 |
+| `weight_kg` | 체중 | kg 단위, 선택 값, 1~500 허용 |
+| `user_goal` | 사용자 목표 | 루틴 방향을 결정하는 핵심 값 |
+| `exercise_experience` | 운동 경험 수준/설명 | 난이도와 볼륨 조절 기준 |
+| `available_days_per_week` | 주당 운동 가능 횟수 | 1~7 허용. 루틴은 이 값 이하 일수로 생성 |
+| `restricted_body_parts` | 제한 부위 배열 | 없으면 `[]` 권장. 예: `["무릎", "허리"]` |
+| `purpose` | 호출 목적 | 로그와 프롬프트 참고용 |
+
 요청 예시:
 
 ```json
@@ -205,6 +274,20 @@ Content-Type: application/json
   "purpose": "프로필 기반 주간 루틴 추천"
 }
 ```
+
+응답:
+
+| 변수 | 의미 | PC3 사용 기준 |
+| --- | --- | --- |
+| `summary` | 루틴 전체 요약 | 프론트 상단 요약 |
+| `weekly_focus` | 이번 주 핵심 방향 | 주간 목표 문구 |
+| `weekly_routine` | 일자별 루틴 배열 | 최대 `available_days_per_week`개 |
+| `weekly_routine[].day_index` | 루틴 일차 번호 | 1~7, UI 정렬 기준 |
+| `weekly_routine[].day_label` | 화면 표시용 일차 라벨 | 예: `Day 1`, `1일차` |
+| `weekly_routine[].focus` | 해당 일차 운동 초점 | 카드 제목/설명 |
+| `weekly_routine[].exercises` | 해당 일차 운동 목록 | 기존 운동 계획 item 구조 |
+| `cautions` | 제한 부위 관련 주의사항 | 사용자 주의 문구 |
+| `pc3_payload` | 프론트 전달용 payload | PC3가 그대로 전달 가능 |
 
 응답 스키마:
 
