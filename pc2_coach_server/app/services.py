@@ -5,12 +5,20 @@ from uuid import uuid4
 from fastapi import HTTPException
 
 from app.config import FALLBACK_LLM_ENABLED
-from app.db import find_existing_session_log, get_latest_baseline, save_coach_log, save_exercise_baseline
+from app.db import (
+    find_existing_session_log,
+    get_latest_baseline,
+    get_latest_profile_routine,
+    save_coach_log,
+    save_exercise_baseline,
+    save_profile_routine,
+)
 from app.exercise_planning import build_baseline_diff, build_baseline_profile, retrieve_analysis_context
 from app.llm_client import (
     call_fallback_llm,
     call_llm_with_fallback,
     call_primary_llm,
+    call_primary_profile_routine_llm,
     is_fallback_llm_configured,
     is_primary_llm_configured,
 )
@@ -23,6 +31,7 @@ from app.schemas import (
     ExerciseBaselineProfile,
     FeaturePayload,
     RoutineProfileRequest,
+    RoutineProfileRecord,
 )
 from app.signal_service import build_query_text, compact_for_prompt, detect_signals, dump_signals
 
@@ -284,6 +293,7 @@ def generate_coaching_response(payload: FeaturePayload, logger) -> dict:
         raise
 
     baseline_profile = load_baseline_profile(payload)
+    latest_profile_routine = get_latest_profile_routine(payload.user_id)
     enriched_payload = merge_baseline_diff(payload, baseline_profile)
     query_text = build_query_text(enriched_payload, baseline=baseline_profile)
     signals = detect_signals(enriched_payload)
@@ -296,6 +306,7 @@ def generate_coaching_response(payload: FeaturePayload, logger) -> dict:
         query_text=query_text,
         baseline=baseline_profile,
         analysis_context=context_data,
+        latest_profile_routine=latest_profile_routine,
     )
     system_prompt, user_prompt = build_coach_prompt(prompt_data)
     fallback_system_prompt, fallback_user_prompt = build_coach_prompt(prompt_data, compact=True)
@@ -412,6 +423,7 @@ def generate_coaching_response(payload: FeaturePayload, logger) -> dict:
         detected_signals_json=signal_data,
         analysis_context_json=context_data,
         baseline_snapshot_json=dump_model(baseline_profile),
+        routine_snapshot_json=latest_profile_routine,
         pc2_output_json=db_pc2_output,
         llm_prompt=llm_prompt,
         raw_llm_response=raw_llm,
@@ -455,6 +467,8 @@ def generate_profile_routine_response(payload: RoutineProfileRequest, logger) ->
         "weekly_focus": "",
         "weekly_routine": [],
         "cautions": _restriction_cautions(payload.restricted_body_parts),
+        "available_days_per_week": payload.available_days_per_week,
+        "restricted_body_parts": payload.restricted_body_parts,
         "pc3_payload": {},
     }
     system_prompt, user_prompt = build_profile_routine_prompt(prompt_payload)
@@ -474,7 +488,7 @@ def generate_profile_routine_response(payload: RoutineProfileRequest, logger) ->
         )
 
     try:
-        llm_result = call_primary_llm(system_prompt, user_prompt)
+        llm_result = call_primary_profile_routine_llm(system_prompt, user_prompt)
         raw_llm = llm_result["content"]
     except Exception as exc:
         logger.warning(
@@ -508,11 +522,37 @@ def generate_profile_routine_response(payload: RoutineProfileRequest, logger) ->
             },
         ) from exc
 
+    routine_id = f"routine_{uuid4().hex[:12]}"
+    save_profile_routine(
+        routine_id=routine_id,
+        user_id=payload.user_id,
+        profile_name=payload.profile_name,
+        weight_kg=payload.weight_kg,
+        user_goal=payload.user_goal,
+        exercise_experience=payload.exercise_experience,
+        available_days_per_week=payload.available_days_per_week,
+        restricted_body_parts=payload.restricted_body_parts,
+        purpose=payload.purpose,
+        routine_response_json=final_response,
+        source_model=llm_result["model_name"],
+        llm_route=llm_result["served_by"],
+    )
+
     logger.info(
-        "profile_routine_request_success request_id=%s user_id=%s route=%s days=%s",
+        "profile_routine_request_success request_id=%s routine_id=%s user_id=%s route=%s days=%s",
         request_id,
+        routine_id,
         payload.user_id,
         llm_result["served_by"],
         len(final_response.get("weekly_routine") or []),
     )
     return final_response
+
+
+def get_profile_routine_record(user_id: str) -> dict:
+    routine = get_latest_profile_routine(user_id)
+    if routine is None:
+        raise HTTPException(status_code=404, detail="저장된 프로필 루틴을 찾지 못했습니다.")
+    if hasattr(RoutineProfileRecord, "model_validate"):
+        return RoutineProfileRecord.model_validate(routine).model_dump()
+    return RoutineProfileRecord.parse_obj(routine).dict()

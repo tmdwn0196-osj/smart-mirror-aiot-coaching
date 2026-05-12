@@ -172,6 +172,7 @@ def compact_for_prompt(
     query_text: str | None = None,
     baseline: ExerciseBaselineProfile | None = None,
     analysis_context: list[dict[str, Any]] | None = None,
+    latest_profile_routine: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     feature_json = {
         "features": _dump_model(payload.features),
@@ -198,6 +199,7 @@ def compact_for_prompt(
         "feature_summary": query_text or build_query_text(payload, baseline=baseline),
         "feature_json": feature_json,
         "baseline_profile": _dump_model(baseline) if baseline is not None else None,
+        "latest_profile_routine": latest_profile_routine,
         "analysis_context": analysis_context or [],
         "detected_signals": signal_data,
     }

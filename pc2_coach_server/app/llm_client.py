@@ -15,6 +15,8 @@ from app.config import (
     PRIMARY_LLM_API_KEY,
     PRIMARY_LLM_BASE_URL,
     PRIMARY_LLM_MODEL_NAME,
+    ROUTINE_PROFILE_MAX_TOKENS,
+    ROUTINE_PROFILE_TIMEOUT_SECONDS,
 )
 
 
@@ -129,7 +131,13 @@ def _call_openai_compatible(
         client.close()
 
 
-def call_primary_llm(system_prompt: str, user_prompt: str) -> dict:
+def call_primary_llm(
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    max_tokens: int | None = None,
+    timeout_seconds: float | None = None,
+) -> dict:
     if not is_primary_llm_configured():
         raise RuntimeError("기본 LLM이 설정되어 있지 않습니다.")
     content = _call_openai_compatible(
@@ -138,9 +146,9 @@ def call_primary_llm(system_prompt: str, user_prompt: str) -> dict:
         model_name=PRIMARY_LLM_MODEL_NAME,
         system_prompt=system_prompt,
         user_prompt=user_prompt,
-        max_tokens=LLM_MAX_TOKENS,
+        max_tokens=max_tokens or LLM_MAX_TOKENS,
         expect_json=True,
-        timeout_seconds=PRIMARY_LLM_TIMEOUT_SECONDS,
+        timeout_seconds=timeout_seconds or PRIMARY_LLM_TIMEOUT_SECONDS,
     )
     return {
         "content": content,
@@ -149,6 +157,15 @@ def call_primary_llm(system_prompt: str, user_prompt: str) -> dict:
         "fallback_used": False,
         "primary_error": None,
     }
+
+
+def call_primary_profile_routine_llm(system_prompt: str, user_prompt: str) -> dict:
+    return call_primary_llm(
+        system_prompt,
+        user_prompt,
+        max_tokens=ROUTINE_PROFILE_MAX_TOKENS,
+        timeout_seconds=ROUTINE_PROFILE_TIMEOUT_SECONDS,
+    )
 
 
 def call_fallback_llm(system_prompt: str, user_prompt: str, primary_error: str) -> dict:

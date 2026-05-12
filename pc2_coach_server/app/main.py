@@ -12,9 +12,15 @@ from app.schemas import (
     ExerciseBaselineRecord,
     FeaturePayload,
     RoutineProfileRequest,
+    RoutineProfileRecord,
     RoutineProfileResponse,
 )
-from app.services import create_baseline_record, generate_coaching_response, generate_profile_routine_response
+from app.services import (
+    create_baseline_record,
+    generate_coaching_response,
+    generate_profile_routine_response,
+    get_profile_routine_record,
+)
 
 
 logger = logging.getLogger("pc2_coach")
@@ -67,6 +73,11 @@ def generate_coaching(payload: FeaturePayload) -> dict:
 @app.post("/api/routine/profile", response_model=RoutineProfileResponse)
 def generate_profile_routine(payload: RoutineProfileRequest) -> dict:
     return generate_profile_routine_response(payload, logger)
+
+
+@app.get("/api/routine/profile/{user_id}", response_model=RoutineProfileRecord)
+def get_profile_routine(user_id: str) -> dict:
+    return get_profile_routine_record(user_id)
 
 
 @app.get("/api/coach/logs/{user_id}")

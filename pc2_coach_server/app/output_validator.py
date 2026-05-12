@@ -3,7 +3,7 @@ import re
 from typing import Any
 
 from app.schemas import CoachingResponse
-from app.schemas import RoutineProfileResponse
+from app.schemas import EXERCISE_TYPE_VALUES, RoutineProfileResponse, normalize_exercise_type_name
 
 
 def _strip_code_fence(text: str) -> str:
@@ -64,6 +64,20 @@ def _normalize_plan(plan: Any) -> list[dict[str, Any]]:
                 "reason": str(item.get("reason") or ""),
             }
         )
+    return normalized
+
+
+def _normalize_routine_plan(plan: Any) -> list[dict[str, Any]]:
+    normalized = _normalize_plan(plan)
+    for item in normalized:
+        normalized_name = normalize_exercise_type_name(str(item.get("exercise") or ""))
+        if not normalized_name:
+            raise ValueError(
+                "프로필 루틴의 exercise는 "
+                + ", ".join(EXERCISE_TYPE_VALUES)
+                + " 중 하나여야 합니다."
+            )
+        item["exercise"] = normalized_name
     return normalized
 
 
@@ -201,7 +215,7 @@ def parse_profile_routine_json(raw_text: str, base_response: dict[str, Any]) -> 
                 "day_index": int(day.get("day_index") or 0),
                 "day_label": str(day.get("day_label") or ""),
                 "focus": str(day.get("focus") or ""),
-                "exercises": _normalize_plan(day.get("exercises")),
+                "exercises": _normalize_routine_plan(day.get("exercises")),
             }
         )
 
@@ -212,20 +226,34 @@ def parse_profile_routine_json(raw_text: str, base_response: dict[str, Any]) -> 
         if item and item not in merged_cautions:
             merged_cautions.append(item)
 
+    request_available_days = base_response.get("available_days_per_week")
+    request_restricted_parts = base_response.get("restricted_body_parts") or []
     pc3_payload = parsed.get("pc3_payload")
     if not isinstance(pc3_payload, dict):
-        pc3_payload = {
-            "summary": summary,
-            "weekly_focus": weekly_focus,
-            "weekly_routine": weekly_routine,
-        }
+        pc3_payload = {}
+
+    merged_pc3_payload = {
+        "summary": str(pc3_payload.get("summary") or summary).strip(),
+        "weekly_focus": str(pc3_payload.get("weekly_focus") or weekly_focus).strip(),
+        "available_days_per_week": (
+            int(pc3_payload.get("available_days_per_week"))
+            if pc3_payload.get("available_days_per_week") is not None
+            else request_available_days
+        ),
+        "restricted_body_parts": (
+            pc3_payload.get("restricted_body_parts")
+            if isinstance(pc3_payload.get("restricted_body_parts"), list)
+            else request_restricted_parts
+        ),
+        "weekly_routine": pc3_payload.get("weekly_routine") if isinstance(pc3_payload.get("weekly_routine"), list) else weekly_routine,
+    }
 
     merged = {
         "summary": summary,
         "weekly_focus": weekly_focus,
         "weekly_routine": weekly_routine,
         "cautions": merged_cautions,
-        "pc3_payload": pc3_payload,
+        "pc3_payload": merged_pc3_payload,
     }
 
     if hasattr(RoutineProfileResponse, "model_validate"):

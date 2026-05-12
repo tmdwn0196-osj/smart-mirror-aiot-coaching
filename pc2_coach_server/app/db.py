@@ -28,6 +28,7 @@ coach_logs = Table(
     Column("rag_evidence_json", Text, nullable=False, default="[]"),
     Column("analysis_context_json", Text, nullable=False, default="[]"),
     Column("baseline_snapshot_json", Text, nullable=False, default="{}"),
+    Column("routine_snapshot_json", Text, nullable=False, default="{}"),
     Column("pc2_output_json", Text, nullable=False, default="{}"),
     Column("llm_prompt", Text, nullable=False),
     Column("raw_llm_response", Text, nullable=False),
@@ -50,6 +51,26 @@ exercise_baselines = Table(
     Column("exercise_type", String(64), nullable=False, index=True),
     Column("purpose", Text, nullable=True),
     Column("baseline_profile_json", Text, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
+profile_routines = Table(
+    "profile_routines",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("routine_id", String(128), nullable=False, index=True),
+    Column("user_id", String(128), nullable=False, index=True),
+    Column("profile_name", String(255), nullable=True),
+    Column("weight_kg", Text, nullable=True),
+    Column("user_goal", Text, nullable=False),
+    Column("exercise_experience", Text, nullable=False),
+    Column("available_days_per_week", Integer, nullable=False),
+    Column("restricted_body_parts_json", Text, nullable=False, default="[]"),
+    Column("purpose", Text, nullable=True),
+    Column("routine_response_json", Text, nullable=False),
+    Column("source_model", String(255), nullable=False),
+    Column("llm_route", String(32), nullable=True),
+    Column("status", String(32), nullable=False, default="generated"),
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
 
@@ -102,6 +123,7 @@ def _ensure_coach_log_columns() -> None:
             cols.add("analysis_context_json")
 
         _add_col(conn, cols, "baseline_snapshot_json", "TEXT", "{}")
+        _add_col(conn, cols, "routine_snapshot_json", "TEXT", "{}")
         _add_col(conn, cols, "pc2_output_json", "TEXT", "{}")
         _add_col(conn, cols, "llm_route", "TEXT")
         _add_col(conn, cols, "fallback_used", "INTEGER")
@@ -190,6 +212,7 @@ def save_coach_log(
     detected_signals_json: list[dict[str, Any]],
     analysis_context_json: list[dict[str, Any]],
     baseline_snapshot_json: dict[str, Any] | None,
+    routine_snapshot_json: dict[str, Any] | None,
     pc2_output_json: dict[str, Any] | None,
     llm_prompt: str,
     raw_llm_response: str,
@@ -215,6 +238,7 @@ def save_coach_log(
                 rag_evidence_json=_dumps(analysis_context_json),
                 analysis_context_json=_dumps(analysis_context_json),
                 baseline_snapshot_json=_dumps(baseline_snapshot_json or {}),
+                routine_snapshot_json=_dumps(routine_snapshot_json or {}),
                 pc2_output_json=_dumps(pc2_output_json or {}),
                 llm_prompt=llm_prompt,
                 raw_llm_response=raw_llm_response,
@@ -258,6 +282,7 @@ def get_logs_by_user(user_id: str, limit: int = 10) -> list[dict[str, Any]]:
                 "detected_signals": _loads(data["detected_signals_json"], default=[]),
                 "analysis_context": _loads(context_raw, default=[]),
                 "baseline_snapshot": _loads(data.get("baseline_snapshot_json"), default={}),
+                "routine_snapshot": _loads(data.get("routine_snapshot_json"), default={}),
                 "pc2_output": _loads(data.get("pc2_output_json"), default={}),
                 "final_response": _loads(data["final_response_json"], default={}),
                 "model_name": data["model_name"],
@@ -270,3 +295,75 @@ def get_logs_by_user(user_id: str, limit: int = 10) -> list[dict[str, Any]]:
             }
         )
     return logs
+
+
+def save_profile_routine(
+    *,
+    routine_id: str,
+    user_id: str,
+    profile_name: str | None,
+    weight_kg: float | None,
+    user_goal: str,
+    exercise_experience: str,
+    available_days_per_week: int,
+    restricted_body_parts: list[str],
+    purpose: str | None,
+    routine_response_json: dict[str, Any],
+    source_model: str,
+    llm_route: str | None,
+    status: str = "generated",
+) -> None:
+    init_db()
+    with engine.begin() as conn:
+        conn.execute(
+            profile_routines.insert().values(
+                routine_id=routine_id,
+                user_id=user_id,
+                profile_name=profile_name,
+                weight_kg=str(weight_kg) if weight_kg is not None else None,
+                user_goal=user_goal,
+                exercise_experience=exercise_experience,
+                available_days_per_week=available_days_per_week,
+                restricted_body_parts_json=_dumps(restricted_body_parts),
+                purpose=purpose,
+                routine_response_json=_dumps(routine_response_json),
+                source_model=source_model,
+                llm_route=llm_route,
+                status=status,
+                created_at=_now(),
+            )
+        )
+
+
+def get_latest_profile_routine(user_id: str) -> dict[str, Any] | None:
+    init_db()
+    stmt = (
+        select(profile_routines)
+        .where(profile_routines.c.user_id == user_id)
+        .order_by(profile_routines.c.created_at.desc())
+        .limit(1)
+    )
+    with engine.begin() as conn:
+        row = conn.execute(stmt).fetchone()
+    if row is None:
+        return None
+
+    data = dict(row._mapping)
+    weight_kg_raw = data.get("weight_kg")
+    weight_kg = float(weight_kg_raw) if weight_kg_raw not in (None, "") else None
+    return {
+        "routine_id": data["routine_id"],
+        "user_id": data["user_id"],
+        "profile_name": data.get("profile_name"),
+        "weight_kg": weight_kg,
+        "user_goal": data["user_goal"],
+        "exercise_experience": data["exercise_experience"],
+        "available_days_per_week": data["available_days_per_week"],
+        "restricted_body_parts": _loads(data.get("restricted_body_parts_json"), default=[]),
+        "purpose": data.get("purpose"),
+        "routine_response": _loads(data.get("routine_response_json"), default={}),
+        "source_model": data["source_model"],
+        "llm_route": data.get("llm_route"),
+        "status": data.get("status") or "generated",
+        "created_at": data["created_at"].isoformat() if data.get("created_at") else None,
+    }

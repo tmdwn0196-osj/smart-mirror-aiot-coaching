@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from fastapi import HTTPException
 from pydantic import ValidationError
-from app.output_validator import parse_coaching_json
+from app.output_validator import parse_coaching_json, parse_profile_routine_json
 
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
@@ -350,7 +350,7 @@ class PC2ApiTests(unittest.TestCase):
 
     def test_generate_profile_routine_success_with_mocked_llm(self):
         llm_result = {
-            "content": '{"summary":"운동 습관 형성을 위한 주간 루틴입니다.","weekly_focus":"주 5회 리듬 유지와 전신 밸런스 확보","weekly_routine":[{"day_index":1,"day_label":"Day 1","focus":"하체와 코어","exercises":[{"exercise":"goblet squat","sets":4,"reps":10,"duration_sec":null,"rest_sec":75,"focus":"하체 안정성","reason":"기초 하체 근력 유지에 적합합니다."}]},{"day_index":2,"day_label":"Day 2","focus":"상체 밀기","exercises":[{"exercise":"incline push-up","sets":3,"reps":12,"duration_sec":null,"rest_sec":60,"focus":"상체 볼륨 확보","reason":"주간 빈도를 유지하기 좋은 난이도입니다."}]}],"cautions":["통증이 있으면 강도를 낮추세요."],"pc3_payload":{"summary":"운동 습관 형성을 위한 주간 루틴입니다.","weekly_focus":"주 5회 리듬 유지와 전신 밸런스 확보","available_days_per_week":5,"restricted_body_parts":[],"weekly_routine":[{"day_index":1,"day_label":"Day 1","focus":"하체와 코어","exercises":[{"exercise":"goblet squat","sets":4,"reps":10,"duration_sec":null,"rest_sec":75,"focus":"하체 안정성","reason":"기초 하체 근력 유지에 적합합니다."}]}]}}',
+            "content": '{"summary":"운동 습관 형성을 위한 주간 루틴입니다.","weekly_focus":"주 5회 리듬 유지와 전신 밸런스 확보","weekly_routine":[{"day_index":1,"day_label":"Day 1","focus":"하체와 코어","exercises":[{"exercise":"squat","sets":4,"reps":10,"duration_sec":null,"rest_sec":75,"focus":"하체 안정성","reason":"기초 하체 근력 유지에 적합합니다."}]},{"day_index":2,"day_label":"Day 2","focus":"상체 밀기","exercises":[{"exercise":"pushup","sets":3,"reps":12,"duration_sec":null,"rest_sec":60,"focus":"상체 볼륨 확보","reason":"주간 빈도를 유지하기 좋은 난이도입니다."}]}],"cautions":["통증이 있으면 강도를 낮추세요."],"pc3_payload":{"summary":"운동 습관 형성을 위한 주간 루틴입니다.","weekly_focus":"주 5회 리듬 유지와 전신 밸런스 확보","available_days_per_week":5,"restricted_body_parts":[],"weekly_routine":[{"day_index":1,"day_label":"Day 1","focus":"하체와 코어","exercises":[{"exercise":"squat","sets":4,"reps":10,"duration_sec":null,"rest_sec":75,"focus":"하체 안정성","reason":"기초 하체 근력 유지에 적합합니다."}]}]}}',
             "served_by": "primary",
             "model_name": "mock-model",
             "fallback_used": False,
@@ -358,15 +358,96 @@ class PC2ApiTests(unittest.TestCase):
         }
 
         with patch("app.services.is_primary_llm_configured", return_value=True), patch(
-            "app.services.call_primary_llm", return_value=llm_result
+            "app.services.call_primary_profile_routine_llm", return_value=llm_result
         ):
             response = self.main.generate_profile_routine(
                 self.main.RoutineProfileRequest(**self._profile_payload())
             )
 
         self.assertEqual(response["weekly_focus"], "주 5회 리듬 유지와 전신 밸런스 확보")
-        self.assertEqual(response["weekly_routine"][0]["exercises"][0]["exercise"], "goblet squat")
+        self.assertEqual(response["weekly_routine"][0]["exercises"][0]["exercise"], "squat")
         self.assertEqual(response["pc3_payload"]["available_days_per_week"], 5)
+
+        saved = self.main.get_profile_routine("profile_user")
+        self.assertEqual(saved["user_goal"], "운동 습관 만들기")
+        self.assertEqual(saved["routine_response"]["weekly_focus"], response["weekly_focus"])
+        self.assertEqual(saved["source_model"], "mock-model")
+
+    def test_parse_profile_routine_json_backfills_pc3_payload(self):
+        raw = (
+            '{"summary":"주간 루틴입니다.","weekly_focus":"하체 안정성 유지",'
+            '"weekly_routine":[{"day_index":1,"day_label":"Day 1","focus":"하체와 코어",'
+            '"exercises":[{"exercise":"squat","sets":3,"reps":12,"rest_sec":60,"focus":"둔근 활성화","reason":"무릎 부담을 줄입니다."}]}],'
+            '"cautions":["무릎 통증 시 강도 조절"]}'
+        )
+        parsed = parse_profile_routine_json(
+            raw,
+            {
+                "cautions": ["무릎 통증 시 강도 조절"],
+                "available_days_per_week": 4,
+                "restricted_body_parts": ["무릎"],
+            },
+        )
+        self.assertEqual(parsed["pc3_payload"]["available_days_per_week"], 4)
+        self.assertEqual(parsed["pc3_payload"]["restricted_body_parts"], ["무릎"])
+        self.assertEqual(parsed["pc3_payload"]["weekly_focus"], "하체 안정성 유지")
+        self.assertEqual(parsed["pc3_payload"]["weekly_routine"][0]["day_label"], "Day 1")
+
+    def test_parse_profile_routine_json_rejects_non_exercise_type_name(self):
+        raw = (
+            '{"summary":"주간 루틴입니다.","weekly_focus":"하체 안정성 유지",'
+            '"weekly_routine":[{"day_index":1,"day_label":"Day 1","focus":"하체와 코어",'
+            '"exercises":[{"exercise":"bridge","sets":3,"reps":12,"rest_sec":60,"focus":"둔근 활성화","reason":"무릎 부담을 줄입니다."}]}],'
+            '"cautions":["무릎 통증 시 강도 조절"]}'
+        )
+        with self.assertRaises(ValueError) as ctx:
+            parse_profile_routine_json(
+                raw,
+                {
+                    "cautions": ["무릎 통증 시 강도 조절"],
+                    "available_days_per_week": 4,
+                    "restricted_body_parts": ["무릎"],
+                },
+            )
+        self.assertIn("exercise는 squat, jumping_jack, knee_raise, lunge, pushup", str(ctx.exception))
+
+    def test_generate_coaching_uses_saved_profile_routine_context(self):
+        routine_llm_result = {
+            "content": '{"summary":"하체 중심 루틴입니다.","weekly_focus":"하체 안정성과 코어 유지","weekly_routine":[{"day_index":1,"day_label":"Day 1","focus":"하체와 코어","exercises":[{"exercise":"squat","sets":4,"reps":10,"duration_sec":null,"rest_sec":75,"focus":"하체 안정성","reason":"기초 하체 근력 유지에 적합합니다."}]}],"cautions":["무릎 통증이 있으면 즉시 강도를 낮추세요."],"pc3_payload":{"summary":"하체 중심 루틴입니다.","weekly_focus":"하체 안정성과 코어 유지","weekly_routine":[{"day_index":1,"day_label":"Day 1","focus":"하체와 코어","exercises":[{"exercise":"squat","sets":4,"reps":10,"duration_sec":null,"rest_sec":75,"focus":"하체 안정성","reason":"기초 하체 근력 유지에 적합합니다."}]}]}}',
+            "served_by": "primary",
+            "model_name": "profile-model",
+            "fallback_used": False,
+            "primary_error": None,
+        }
+        coaching_llm_result = {
+            "content": '{"summary":"루틴 맥락을 반영한 코칭입니다.","priority":"무릎 정렬","exercise_plan":[{"exercise":"tempo squat","sets":3,"reps":6,"duration_sec":null,"rest_sec":90,"focus":"무릎 정렬","reason":"저장된 주간 루틴의 하체 안정성 목표와 현재 자세 신호를 함께 반영했습니다."}],"mirror_message":"무릎 정렬부터 다시 잡으세요!","warnings":[],"pc2_payload":{"message":"하체 루틴 방향 유지, 무릎 정렬 우선","display_lines":["무릎 정렬","하체 안정성"]}}',
+            "served_by": "primary",
+            "model_name": "coach-model",
+            "fallback_used": False,
+            "primary_error": None,
+        }
+
+        with patch("app.services.is_primary_llm_configured", return_value=True), patch(
+            "app.services.call_primary_profile_routine_llm", return_value=routine_llm_result
+        ):
+            self.main.generate_profile_routine(self.main.RoutineProfileRequest(**self._profile_payload()))
+
+        with patch("app.services.is_primary_llm_configured", return_value=True), patch(
+            "app.services.call_llm_with_fallback", return_value=coaching_llm_result
+        ) as mocked_call:
+            response = self.main.generate_coaching(self.schemas.FeaturePayload(**self._pc3_payload(user_id="profile_user")))
+
+        self.assertEqual(response["priority"], "무릎 정렬")
+        _, user_prompt = mocked_call.call_args.args[:2]
+        self.assertIn("latest_profile_routine", user_prompt)
+        self.assertIn("하체 안정성과 코어 유지", user_prompt)
+        self.assertIn("squat", user_prompt)
+
+        logs = self.main.coach_logs("profile_user", limit=10)
+        self.assertEqual(
+            logs["logs"][0]["routine_snapshot"]["routine_response"]["weekly_focus"],
+            "하체 안정성과 코어 유지",
+        )
 
     def test_generate_profile_routine_requires_primary_llm(self):
         with self.assertRaises(HTTPException) as ctx:
@@ -378,7 +459,7 @@ class PC2ApiTests(unittest.TestCase):
 
     def test_generate_profile_routine_primary_failure_returns_503(self):
         with patch("app.services.is_primary_llm_configured", return_value=True), patch(
-            "app.services.call_primary_llm", side_effect=RuntimeError("forced failure")
+            "app.services.call_primary_profile_routine_llm", side_effect=RuntimeError("forced failure")
         ):
             with self.assertRaises(HTTPException) as ctx:
                 self.main.generate_profile_routine(
@@ -400,7 +481,7 @@ class PC2ApiTests(unittest.TestCase):
             "primary_error": None,
         }
         with patch("app.services.is_primary_llm_configured", return_value=True), patch(
-            "app.services.call_primary_llm", return_value=llm_result
+            "app.services.call_primary_profile_routine_llm", return_value=llm_result
         ):
             with self.assertRaises(HTTPException) as ctx:
                 self.main.generate_profile_routine(

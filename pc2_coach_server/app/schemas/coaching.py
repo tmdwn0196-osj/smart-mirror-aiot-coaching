@@ -2,10 +2,29 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+EXERCISE_TYPE_VALUES = ("squat", "jumping_jack", "knee_raise", "lunge", "pushup")
+EXERCISE_TYPE_ALIASES = {
+    "squat": "squat",
+    "jumping_jack": "jumping_jack",
+    "jumping jack": "jumping_jack",
+    "jumping-jack": "jumping_jack",
+    "knee_raise": "knee_raise",
+    "knee raise": "knee_raise",
+    "knee-raise": "knee_raise",
+    "lunge": "lunge",
+    "pushup": "pushup",
+    "push-up": "pushup",
+    "push up": "pushup",
+}
+
 
 CoachMode = Literal["exercise"]
 CoachEvent = Literal["session_completed"]
 ExerciseType = Literal["squat", "jumping_jack", "knee_raise", "lunge", "pushup"]
+
+
+def normalize_exercise_type_name(name: str) -> str | None:
+    return EXERCISE_TYPE_ALIASES.get(str(name or "").strip().lower())
 
 
 class ContractModel(BaseModel):
@@ -170,3 +189,20 @@ class RoutineProfileResponse(ContractModel):
     weekly_routine: list[WeeklyRoutineDay] = Field(default_factory=list)
     cautions: list[str] = Field(default_factory=list)
     pc3_payload: dict = Field(default_factory=dict)
+
+
+class RoutineProfileRecord(ContractModel):
+    routine_id: str
+    user_id: str
+    profile_name: str | None = None
+    weight_kg: float | None = None
+    user_goal: str
+    exercise_experience: str
+    available_days_per_week: int = Field(ge=1, le=7)
+    restricted_body_parts: list[str] = Field(default_factory=list)
+    purpose: str | None = None
+    routine_response: RoutineProfileResponse
+    source_model: str
+    llm_route: str | None = None
+    status: str
+    created_at: str
