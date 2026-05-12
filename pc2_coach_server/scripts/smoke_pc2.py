@@ -1,6 +1,7 @@
 import argparse
 import json
 import sys
+from uuid import uuid4
 
 import requests
 
@@ -25,10 +26,10 @@ def _expect(condition: bool, message: str) -> None:
         raise AssertionError(message)
 
 
-def _make_pc3_payload() -> dict:
+def _make_pc3_payload(*, user_id: str, session_id: str) -> dict:
     return {
-        "session_id": "sess_exercise_001",
-        "user_id": "exercise_user",
+        "session_id": session_id,
+        "user_id": user_id,
         "mode": "exercise",
         "event": "session_completed",
         "features": {
@@ -65,10 +66,16 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://127.0.0.1:7000")
     parser.add_argument("--timeout", type=float, default=90.0)
+    parser.add_argument("--user-id", default=None)
+    parser.add_argument("--session-id", default=None)
     args = parser.parse_args()
 
+    run_suffix = uuid4().hex[:8]
+    user_id = args.user_id or f"exercise_user_{run_suffix}"
+    session_id = args.session_id or f"sess_exercise_{run_suffix}"
+
     baseline_payload = {
-        "user_id": "exercise_user",
+        "user_id": user_id,
         "exercise_type": "squat",
         "purpose": "하체 루틴 baseline 생성",
         "samples": [
@@ -117,7 +124,7 @@ def main() -> None:
     _expect(baseline["exercise_type"] == "squat", "baseline exercise_type mismatch")
     _expect(baseline["baseline_profile"]["recommended_reps"] >= 1, "baseline recommended_reps missing")
 
-    payload = _make_pc3_payload()
+    payload = _make_pc3_payload(user_id=user_id, session_id=session_id)
 
     _print_step("generate")
     generate_response = session.post(
@@ -143,7 +150,7 @@ def main() -> None:
 
     _print_step("logs")
     logs_response = session.get(
-        f"{args.base_url}/api/coach/logs/exercise_user",
+        f"{args.base_url}/api/coach/logs/{user_id}",
         params={"limit": 10},
         timeout=args.timeout,
     )
@@ -158,7 +165,7 @@ def main() -> None:
     )
 
     _print_step("extra field rejection")
-    bad_payload = _make_pc3_payload()
+    bad_payload = _make_pc3_payload(user_id=user_id, session_id=f"{session_id}_bad")
     bad_payload["features"]["exercise"]["landmarks"] = []
     bad_response = session.post(
         f"{args.base_url}/api/coach/generate",
