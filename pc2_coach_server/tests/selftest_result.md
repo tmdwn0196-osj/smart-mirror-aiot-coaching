@@ -1,8 +1,9 @@
-# PC2 Self Test Result
+# PC2 Self Test Result (Archived)
 
 실행일: 2026-05-11
 
-이 문서는 `tests/selftest.md` 기준으로 PC3 없이 PC2 단독 self-test를 수행한 결과입니다.
+이 문서는 과거 시점의 self-test 수행 결과를 보관한 아카이브입니다.
+현재 기준 문서는 `tests/selftest.md`이며, 이 파일의 수치와 설정은 최신 코드/운영 기준과 다를 수 있습니다.
 
 ## 1. 테스트 환경
 
@@ -18,7 +19,7 @@
 127.0.0.1:7000
 ```
 
-확장 HTTP 점검은 재현성을 위해 아래 설정으로 실행했다.
+확장 HTTP 점검은 당시 재현성을 위해 아래 설정으로 실행했다.
 
 ```bash
 DB_PATH=/tmp/pc2_extended_selftest.db
@@ -49,6 +50,11 @@ FALLBACK_LLM_API_KEY=
 Ran 11 tests in 0.980s
 OK
 ```
+
+주의:
+
+- 현재 테스트 개수와 다를 수 있습니다.
+- 현재 표준 실행 문서는 fallback vLLM Docker 포함 순서를 기준으로 설명합니다.
 
 판정:
 
@@ -473,4 +479,3 @@ PC3는 운동 세션 종료 시점에만 호출해야 한다.
 mode=exercise
 event=session_completed
 ```
-

@@ -40,19 +40,21 @@ cd /home/osj/smart-mirror-aiot-coaching/pc2_coach_server
 
 ## 3. 서버 실행
 
-```bash
-../.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 7000
-```
-
-서버 프로세스는 켜 둔 상태에서, 아래 `curl` 명령은 다른 터미널에서 실행한다.
-
-표준 실행은 아래 순서를 권장한다.
+표준 실행은 아래 순서를 기준으로 한다.
 
 ```bash
 cp .env.example .env
 docker compose -f docker-compose.vllm.yml up -d
 ./scripts/run_pc2.sh
 ```
+
+PC2 API만 단독으로 띄워야 할 때는 아래 직접 실행 명령을 사용할 수 있다.
+
+```bash
+../.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 7000
+```
+
+서버 프로세스는 켜 둔 상태에서, 아래 `curl` 명령은 다른 터미널에서 실행한다.
 
 health 확인:
 

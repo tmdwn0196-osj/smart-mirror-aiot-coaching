@@ -74,7 +74,7 @@ FALLBACK_LLM_BASE_URL = _env_chain(
 )
 FALLBACK_LLM_MODEL_NAME = _env_chain(
     ["FALLBACK_LLM_MODEL_NAME", "VLLM_MODEL_NAME"],
-    "Qwen/Qwen2.5-3B-Instruct",
+    "Qwen/Qwen2.5-1.5B-Instruct-AWQ",
 )
 FALLBACK_LLM_API_KEY = _env_chain(
     ["FALLBACK_LLM_API_KEY", "VLLM_API_KEY"],

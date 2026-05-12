@@ -45,6 +45,7 @@ curl http://127.0.0.1:7000/health
 - `7000`: PC2 API
 - `8000`: fallback vLLM Docker
 - 표준 `.env.example`은 `FALLBACK_LLM_ENABLED=true` 기준입니다.
+- fallback vLLM 모델 기준값은 `Qwen/Qwen2.5-1.5B-Instruct-AWQ`입니다.
 - 프로필 루틴 `/api/routine/profile`은 primary LLM 전용이라 vLLM이 아니라 `PRIMARY_LLM_*` 설정을 사용합니다.
 
 PC2 API만 직접 띄우는 명령은 아래와 같습니다.

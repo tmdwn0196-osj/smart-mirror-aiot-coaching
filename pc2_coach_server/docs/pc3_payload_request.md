@@ -256,7 +256,7 @@ Content-Type: application/json
 | `weight_kg` | 체중 | kg 단위, 선택 값, 1~500 허용 |
 | `user_goal` | 사용자 목표 | 루틴 방향을 결정하는 핵심 값 |
 | `exercise_experience` | 운동 경험 수준/설명 | 난이도와 볼륨 조절 기준 |
-| `available_days_per_week` | 주당 운동 가능 횟수 | 1~7 허용. 루틴은 이 값 이하 일수로 생성 |
+| `available_days_per_week` | 주당 운동 가능 횟수 | 1~7 허용. 프롬프트는 이 값을 기준으로 루틴 일수를 맞추도록 요청하지만, 현재 parser가 응답 길이를 강제 검증하지는 않음 |
 | `restricted_body_parts` | 제한 부위 배열 | 없으면 `[]` 권장. 예: `["무릎", "허리"]` |
 | `purpose` | 호출 목적 | 로그와 프롬프트 참고용 |
 
@@ -281,13 +281,13 @@ Content-Type: application/json
 | --- | --- | --- |
 | `summary` | 루틴 전체 요약 | 프론트 상단 요약 |
 | `weekly_focus` | 이번 주 핵심 방향 | 주간 목표 문구 |
-| `weekly_routine` | 일자별 루틴 배열 | 최대 `available_days_per_week`개 |
+| `weekly_routine` | 일자별 루틴 배열 | 프롬프트는 `available_days_per_week` 기준으로 생성을 요청하지만, 현재 코드가 응답 길이를 강제 검증하지는 않음 |
 | `weekly_routine[].day_index` | 루틴 일차 번호 | 1~7, UI 정렬 기준 |
 | `weekly_routine[].day_label` | 화면 표시용 일차 라벨 | 예: `Day 1`, `1일차` |
 | `weekly_routine[].focus` | 해당 일차 운동 초점 | 카드 제목/설명 |
 | `weekly_routine[].exercises` | 해당 일차 운동 목록 | 기존 운동 계획 item 구조 |
 | `cautions` | 제한 부위 관련 주의사항 | 사용자 주의 문구 |
-| `pc3_payload` | 프론트 전달용 payload | PC3가 그대로 전달 가능 |
+| `pc3_payload` | 프론트 전달용 payload | LLM이 함께 내려주면 그대로 전달 가능. 현재 parser 기본 보완은 `summary`, `weekly_focus`, `weekly_routine`까지만 수행함 |
 
 응답 스키마:
 

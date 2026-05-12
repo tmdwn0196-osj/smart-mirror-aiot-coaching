@@ -62,6 +62,7 @@ docker compose -f docker-compose.vllm.yml up -d
 
 - `7000`: PC2 API
 - `8000`: fallback vLLM Docker
+- fallback vLLM 모델: `Qwen/Qwen2.5-1.5B-Instruct-AWQ`
 
 확인 명령:
 
