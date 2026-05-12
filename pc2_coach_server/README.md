@@ -32,7 +32,7 @@ PC3는 운동 분석 결과를 `FeaturePayload` JSON으로 보내고, PC2는:
 1. 사용자별 최신 baseline 조회
 2. 현재 feature와 baseline 차이 계산
 3. 로컬 지식 검색 기반 분석 컨텍스트 구성
-4. LLM으로 운동 계획표 생성
+4. primary LLM 호출 후 실패 시 fallback vLLM, 그마저 실패하면 로컬 규칙 fallback으로 운동 계획표 생성
 5. 결과와 근거를 DB에 기록
 6. PC3와 PC2 화면용 payload를 함께 반환
 
@@ -43,16 +43,44 @@ PC3는 운동 분석 결과를 `FeaturePayload` JSON으로 보내고, PC2는:
 
 ## 실행 방법
 
+기본 기준은 `fallback vLLM Docker + PC2 API`를 함께 올리는 전체 실행입니다.
+
 ```bash
 cd /home/osj/smart-mirror-aiot-coaching/pc2_coach_server
 cp .env.example .env
-../.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 7000
+docker compose -f docker-compose.vllm.yml up -d
+./scripts/run_pc2.sh
 ```
 
 - 환경변수 파일은 `pc2_coach_server/.env`를 우선 로드합니다.
 - `.env`가 없어도 실행은 가능하며, 이 경우 기본값과 로컬 규칙 기반 대체 경로를 사용합니다.
 - 서비스 기준 템플릿은 `pc2_coach_server/.env.example`입니다.
 - 루트의 `.env.example`은 워크스페이스 공용 예시 파일입니다.
+- 표준 `.env.example`은 `FALLBACK_LLM_ENABLED=true` 기준입니다.
+
+실행 포트:
+
+- `7000`: PC2 API
+- `8000`: fallback vLLM Docker
+
+확인 명령:
+
+```bash
+curl http://127.0.0.1:7000/health
+curl http://127.0.0.1:8000/v1/models
+```
+
+직접 실행 명령:
+
+```bash
+cd /home/osj/smart-mirror-aiot-coaching/pc2_coach_server
+../.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 7000
+```
+
+주의:
+
+- `/api/coach/generate`의 표준 호출 순서는 `primary LLM -> fallback vLLM -> local rule fallback`입니다.
+- `/api/routine/profile`은 primary LLM 전용입니다. 즉 Docker로 띄운 fallback vLLM이 아니라 `PRIMARY_LLM_*` 설정을 사용합니다.
 
 ## API
 

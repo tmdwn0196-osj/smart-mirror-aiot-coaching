@@ -13,7 +13,7 @@ PC2는 운동 세션 기반 계획 생성과 프로필 기반 주간 루틴 생�
 - 사용자별 baseline을 저장하고 조회함
 - 현재 운동 상태와 baseline 차이를 계산함
 - 로컬 운동 지식 컨텍스트를 검색함
-- LLM 또는 로컬 규칙 기반 fallback으로 운동 계획표를 생성함
+- primary LLM, fallback vLLM, 로컬 규칙 fallback 순서로 운동 계획표를 생성함
 - PC1 사용자 프로필 값을 받아 primary LLM으로 주간 루틴 JSON을 생성함
 - 결과를 DB에 기록하고 PC3에 JSON으로 반환함
 
@@ -57,21 +57,40 @@ PC2는 운동 세션 기반 계획 생성과 프로필 기반 주간 루틴 생�
 
 ## 3. 실행 방법
 
+프로젝트 표준 실행은 `fallback vLLM Docker`와 `PC2 API`를 함께 올리는 방식입니다.
+
 ```bash
 cd /home/osj/smart-mirror-aiot-coaching/pc2_coach_server
 cp .env.example .env
+docker compose -f docker-compose.vllm.yml up -d
 ./scripts/run_pc2.sh
 ```
 
 기본 실행 주소:
 
 - `http://0.0.0.0:7000`
+- fallback vLLM: `http://127.0.0.1:8000/v1`
 
 상태 확인:
 
 ```bash
 curl http://127.0.0.1:7000/health
+curl http://127.0.0.1:8000/v1/models
 ```
+
+실행 순서:
+
+1. `pc2_coach_server/.env` 준비
+2. `docker compose -f docker-compose.vllm.yml up -d`로 fallback vLLM 실행
+3. `./scripts/run_pc2.sh`로 PC2 API 실행
+4. `7000`, `8000` health 확인
+
+참고:
+
+- `7000`은 PC2 API 포트입니다.
+- `8000`은 fallback vLLM Docker 포트입니다.
+- 표준 `.env.example`은 `FALLBACK_LLM_ENABLED=true` 기준입니다.
+- `/api/routine/profile`은 primary LLM 전용이라 fallback vLLM이 아니라 `PRIMARY_LLM_*` 설정을 사용합니다.
 
 ## 4. 환경변수 처리 방식
 
@@ -83,7 +102,7 @@ curl http://127.0.0.1:7000/health
 - `.env`가 없어도 실행 가능
 - 값이 비어 있으면 안전한 기본값 사용
 - 숫자형 env가 잘못되어도 기본값으로 복구
-- `/api/coach/generate`는 LLM 설정이 없거나 호출 실패 시 로컬 규칙 기반 fallback 사용
+- `/api/coach/generate`는 primary LLM 실패 시 fallback vLLM, 그마저 실패하면 로컬 규칙 기반 fallback 사용
 - `/api/routine/profile`은 primary LLM 전용이며 실패 시 `503` 반환
 
 기본값 예시:
@@ -105,7 +124,7 @@ curl http://127.0.0.1:7000/health
 현재 서버는 아래 경우에도 `/api/coach/generate` 요청을 처리합니다.
 
 - `PRIMARY_LLM_API_KEY` 없음
-- fallback LLM 설정 없음
+- fallback vLLM 미실행 또는 설정 없음
 - 외부 네트워크 실패
 - LLM 응답 파싱 실패
 

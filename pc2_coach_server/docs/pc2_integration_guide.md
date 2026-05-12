@@ -11,6 +11,7 @@ PC1 -> PC3 Vision Gateway -> PC2 Coach API
 PC2는 PC3에서 전달하는 운동 `FeaturePayload`를 받아 운동 계획표 JSON을 생성합니다.
 PC2는 저장된 baseline과 로컬 운동 지식 검색 결과를 함께 사용합니다.
 PC1 프론트의 사용자 프로필 값은 PC3를 거쳐 `/api/routine/profile`로 전달되며, primary LLM으로 주간 루틴 JSON을 생성합니다.
+운영 기준으로 `POST /api/coach/generate`는 `primary LLM -> fallback vLLM -> local rule fallback` 순서를 사용합니다.
 
 ## 엔드포인트
 
@@ -34,6 +35,17 @@ PC3 설정:
 PC2_COACH_API_URL=http://<PC2_HOST>:7000/api/coach/generate
 PC2_ROUTINE_PROFILE_API_URL=http://<PC2_HOST>:7000/api/routine/profile
 ```
+
+PC2 서버 표준 실행:
+
+```bash
+cd /home/osj/smart-mirror-aiot-coaching/pc2_coach_server
+cp .env.example .env
+docker compose -f docker-compose.vllm.yml up -d
+./scripts/run_pc2.sh
+```
+
+표준 `.env.example`은 `FALLBACK_LLM_ENABLED=true` 기준입니다.
 
 ## 실행 구조
 

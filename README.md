@@ -24,9 +24,33 @@
 
 ## 빠른 시작
 
+프로젝트 표준 실행 순서는 `fallback vLLM Docker`를 먼저 올리고, 그 다음 `PC2 API`를 실행하는 방식입니다.
+운영 기준으로는 `coach/generate`가 `primary LLM -> fallback vLLM -> local rule fallback` 순서를 사용합니다.
+
 ```bash
 cd /home/osj/smart-mirror-aiot-coaching/pc2_coach_server
-cp ../.env.example .env
+cp .env.example .env
+docker compose -f docker-compose.vllm.yml up -d
+./scripts/run_pc2.sh
+```
+
+상태 확인:
+
+```bash
+curl http://127.0.0.1:7000/health
+```
+
+참고:
+
+- `7000`: PC2 API
+- `8000`: fallback vLLM Docker
+- 표준 `.env.example`은 `FALLBACK_LLM_ENABLED=true` 기준입니다.
+- 프로필 루틴 `/api/routine/profile`은 primary LLM 전용이라 vLLM이 아니라 `PRIMARY_LLM_*` 설정을 사용합니다.
+
+PC2 API만 직접 띄우는 명령은 아래와 같습니다.
+
+```bash
+cd /home/osj/smart-mirror-aiot-coaching/pc2_coach_server
 ../.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 7000
 ```
 
