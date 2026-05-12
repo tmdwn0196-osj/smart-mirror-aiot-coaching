@@ -3,3 +3,4 @@ __pycache__/
 *.pyc
 data/routine_agent.db
 data/pc2_coach.db
+data/backups/*.db

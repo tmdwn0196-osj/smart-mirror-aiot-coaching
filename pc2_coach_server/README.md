@@ -55,7 +55,6 @@ docker compose -f docker-compose.vllm.yml up -d
 - 환경변수 파일은 `pc2_coach_server/.env`를 우선 로드합니다.
 - `.env`가 없어도 실행은 가능하며, 이 경우 기본값과 로컬 규칙 기반 대체 경로를 사용합니다.
 - 서비스 기준 템플릿은 `pc2_coach_server/.env.example`입니다.
-- 루트의 `.env.example`은 워크스페이스 공용 예시 파일입니다.
 - 표준 `.env.example`은 `FALLBACK_LLM_ENABLED=true` 기준입니다.
 
 실행 포트:
