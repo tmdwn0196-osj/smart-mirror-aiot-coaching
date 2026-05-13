@@ -1,10 +1,13 @@
 import importlib
 import os
 import sys
-import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
 from unittest.mock import patch
+from uuid import uuid4
+
+import psycopg
 
 from fastapi import HTTPException
 from pydantic import ValidationError
@@ -12,15 +15,32 @@ from app.output_validator import parse_coaching_json, parse_profile_routine_json
 
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
+TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL", "").strip()
 
 
-def load_main(db_path: str):
+def _schema_url(base_url: str, schema_name: str) -> str:
+    option = f"-csearch_path={schema_name}"
+    separator = "&" if "?" in base_url else "?"
+    return f"{base_url}{separator}options={option}"
+
+
+def _create_schema(base_url: str, schema_name: str):
+    with psycopg.connect(base_url, autocommit=True) as conn:
+        conn.execute(f'CREATE SCHEMA "{schema_name}"')
+
+
+def _drop_schema(base_url: str, schema_name: str):
+    with psycopg.connect(base_url, autocommit=True) as conn:
+        conn.execute(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE')
+
+
+def load_main(database_url: str):
     sys.path.insert(0, str(PROJECT_DIR))
     for name in list(sys.modules):
         if name == "app" or name.startswith("app."):
             sys.modules.pop(name)
 
-    os.environ["DB_PATH"] = db_path
+    os.environ["DATABASE_URL"] = database_url
     os.environ["PRIMARY_LLM_API_KEY"] = ""
     os.environ["NVIDIA_API_KEY"] = ""
     os.environ["LLM_API_KEY"] = ""
@@ -32,13 +52,17 @@ def load_main(db_path: str):
 
 class PC2ApiTests(unittest.TestCase):
     def setUp(self):
-        self.tmpdir = tempfile.TemporaryDirectory()
-        db_path = str(Path(self.tmpdir.name) / "test_pc2.db")
-        self.main = load_main(db_path)
+        if not TEST_DATABASE_URL:
+            self.skipTest("TEST_DATABASE_URL is required for PostgreSQL tests.")
+        self.schema_name = f"test_{uuid4().hex[:12]}"
+        _create_schema(TEST_DATABASE_URL, self.schema_name)
+        self.database_url = _schema_url(TEST_DATABASE_URL, self.schema_name)
+        self.main = load_main(self.database_url)
         self.schemas = importlib.import_module("app.schemas")
 
     def tearDown(self):
-        self.tmpdir.cleanup()
+        if TEST_DATABASE_URL:
+            _drop_schema(TEST_DATABASE_URL, self.schema_name)
 
     def _pc3_payload(self, **overrides):
         payload = {
@@ -349,8 +373,22 @@ class PC2ApiTests(unittest.TestCase):
         self.assertEqual(parsed["pc2_payload"]["message"], "템포 조절부터 시작")
 
     def test_generate_profile_routine_success_with_mocked_llm(self):
-        llm_result = {
-            "content": '{"summary":"운동 습관 형성을 위한 주간 루틴입니다.","weekly_focus":"주 5회 리듬 유지와 전신 밸런스 확보","weekly_routine":[{"day_index":1,"day_label":"Day 1","focus":"하체와 코어","exercises":[{"exercise":"squat","sets":4,"reps":10,"duration_sec":null,"rest_sec":75,"focus":"하체 안정성","reason":"기초 하체 근력 유지에 적합합니다."}]},{"day_index":2,"day_label":"Day 2","focus":"상체 밀기","exercises":[{"exercise":"pushup","sets":3,"reps":12,"duration_sec":null,"rest_sec":60,"focus":"상체 볼륨 확보","reason":"주간 빈도를 유지하기 좋은 난이도입니다."}]}],"cautions":["통증이 있으면 강도를 낮추세요."],"pc3_payload":{"summary":"운동 습관 형성을 위한 주간 루틴입니다.","weekly_focus":"주 5회 리듬 유지와 전신 밸런스 확보","available_days_per_week":5,"restricted_body_parts":[],"weekly_routine":[{"day_index":1,"day_label":"Day 1","focus":"하체와 코어","exercises":[{"exercise":"squat","sets":4,"reps":10,"duration_sec":null,"rest_sec":75,"focus":"하체 안정성","reason":"기초 하체 근력 유지에 적합합니다."}]}]}}',
+        weekly_llm_result = {
+            "content": '{"summary":"운동 습관 형성을 위한 주간 루틴입니다.","weekly_focus":"주 5회 리듬 유지와 전신 밸런스 확보","weekly_routine":[{"day_index":1,"day_label":"Day 1","focus":"하체와 코어","exercises":[{"exercise":"squat","sets":4,"reps":10,"duration_sec":null,"rest_sec":75,"focus":"하체 안정성","reason":"기초 하체 근력 유지에 적합합니다.","how_to":"발을 어깨너비로 벌리고 가슴을 세운 채 엉덩이를 뒤로 빼며 천천히 앉았다가 발바닥으로 밀어 올라옵니다.","tips":"무릎이 안쪽으로 모이지 않게 하고 올라올 때 숨을 내쉽니다."}]},{"day_index":2,"day_label":"Day 2","focus":"상체 밀기","exercises":[{"exercise":"pushup","sets":3,"reps":12,"duration_sec":null,"rest_sec":60,"focus":"상체 볼륨 확보","reason":"주간 빈도를 유지하기 좋은 난이도입니다.","how_to":"손을 어깨보다 약간 넓게 두고 몸통을 일직선으로 유지한 채 가슴이 바닥 가까이 오도록 내려갔다가 밀어 올립니다.","tips":"복부에 힘을 주고 내려갈 때 들이마시고 밀어낼 때 내쉽니다."}]}],"cautions":["통증이 있으면 강도를 낮추세요."],"pc3_payload":{"summary":"운동 습관 형성을 위한 주간 루틴입니다.","weekly_focus":"주 5회 리듬 유지와 전신 밸런스 확보","available_days_per_week":5,"restricted_body_parts":[],"weekly_routine":[{"day_index":1,"day_label":"Day 1","focus":"하체와 코어","exercises":[{"exercise":"squat","sets":4,"reps":10,"duration_sec":null,"rest_sec":75,"focus":"하체 안정성","reason":"기초 하체 근력 유지에 적합합니다.","how_to":"발을 어깨너비로 벌리고 가슴을 세운 채 엉덩이를 뒤로 빼며 천천히 앉았다가 발바닥으로 밀어 올라옵니다.","tips":"무릎이 안쪽으로 모이지 않게 하고 올라올 때 숨을 내쉽니다."}]}]}}',
+            "served_by": "primary",
+            "model_name": "mock-model",
+            "fallback_used": False,
+            "primary_error": None,
+        }
+        day1_llm_result = {
+            "content": '{"day_index":1,"day_label":"Day 1","focus":"하체와 코어 안정화","exercises":[{"exercise":"squat","sets":4,"reps":10,"duration_sec":null,"rest_sec":75,"focus":"하체 안정성","reason":"기초 하체 근력 유지에 적합합니다.","how_to":"발을 어깨너비로 벌리고 가슴을 세운 채 엉덩이를 뒤로 빼며 천천히 앉았다가 발바닥으로 밀어 올라옵니다.","tips":"무릎이 안쪽으로 모이지 않게 하고 올라올 때 숨을 내쉽니다."}]}',
+            "served_by": "primary",
+            "model_name": "mock-model",
+            "fallback_used": False,
+            "primary_error": None,
+        }
+        day2_llm_result = {
+            "content": '{"day_index":2,"day_label":"Day 2","focus":"상체 밀기와 코어 고정","exercises":[{"exercise":"pushup","sets":3,"reps":12,"duration_sec":null,"rest_sec":60,"focus":"상체 볼륨 확보","reason":"주간 빈도를 유지하기 좋은 난이도입니다.","how_to":"손을 어깨보다 약간 넓게 두고 몸통을 일직선으로 유지한 채 가슴이 바닥 가까이 오도록 내려갔다가 밀어 올립니다.","tips":"복부에 힘을 주고 내려갈 때 들이마시고 밀어낼 때 내쉽니다."}]}',
             "served_by": "primary",
             "model_name": "mock-model",
             "fallback_used": False,
@@ -358,26 +396,39 @@ class PC2ApiTests(unittest.TestCase):
         }
 
         with patch("app.services.is_primary_llm_configured", return_value=True), patch(
-            "app.services.call_primary_profile_routine_llm", return_value=llm_result
-        ):
+            "app.services.call_primary_profile_routine_llm",
+            side_effect=[weekly_llm_result, day1_llm_result, day2_llm_result],
+        ) as mocked_call:
             response = self.main.generate_profile_routine(
-                self.main.RoutineProfileRequest(**self._profile_payload())
+                self.main.RoutineProfileRequest(**self._profile_payload(start_date="2026-05-13"))
             )
 
+        self.assertEqual(mocked_call.call_count, 3)
         self.assertEqual(response["weekly_focus"], "주 5회 리듬 유지와 전신 밸런스 확보")
         self.assertEqual(response["weekly_routine"][0]["exercises"][0]["exercise"], "squat")
+        self.assertEqual(response["weekly_routine"][0]["focus"], "하체와 코어 안정화")
+        self.assertIn("천천히 앉았다가", response["weekly_routine"][0]["exercises"][0]["how_to"])
+        self.assertIn("숨을 내쉽니다", response["weekly_routine"][0]["exercises"][0]["tips"])
         self.assertEqual(response["pc3_payload"]["available_days_per_week"], 5)
+        self.assertEqual(response["pc3_payload"]["start_date"], "2026-05-13")
+        self.assertEqual(response["pc3_payload"]["scheduled_dates"][:2], ["2026-05-13", "2026-05-14"])
 
         saved = self.main.get_profile_routine("profile_user")
         self.assertEqual(saved["user_goal"], "운동 습관 만들기")
+        self.assertEqual(saved["start_date"], "2026-05-13")
+        self.assertEqual(saved["scheduled_dates"][:2], ["2026-05-13", "2026-05-14"])
         self.assertEqual(saved["routine_response"]["weekly_focus"], response["weekly_focus"])
         self.assertEqual(saved["source_model"], "mock-model")
+
+        day = self.main.get_profile_routine_day("profile_user", target_date=date(2026, 5, 14))
+        self.assertEqual(day["day_index"], 2)
+        self.assertIn("pushup", day["message"])
 
     def test_parse_profile_routine_json_backfills_pc3_payload(self):
         raw = (
             '{"summary":"주간 루틴입니다.","weekly_focus":"하체 안정성 유지",'
             '"weekly_routine":[{"day_index":1,"day_label":"Day 1","focus":"하체와 코어",'
-            '"exercises":[{"exercise":"squat","sets":3,"reps":12,"rest_sec":60,"focus":"둔근 활성화","reason":"무릎 부담을 줄입니다."}]}],'
+            '"exercises":[{"exercise":"squat","sets":3,"reps":12,"rest_sec":60,"focus":"둔근 활성화","reason":"무릎 부담을 줄입니다.","how_to":"발을 어깨너비로 벌리고 엉덩이를 뒤로 빼며 천천히 앉았다가 올라옵니다.","tips":"발바닥 전체로 밀고 무릎 방향을 발끝과 맞춥니다."}]}],'
             '"cautions":["무릎 통증 시 강도 조절"]}'
         )
         parsed = parse_profile_routine_json(
@@ -392,6 +443,8 @@ class PC2ApiTests(unittest.TestCase):
         self.assertEqual(parsed["pc3_payload"]["restricted_body_parts"], ["무릎"])
         self.assertEqual(parsed["pc3_payload"]["weekly_focus"], "하체 안정성 유지")
         self.assertEqual(parsed["pc3_payload"]["weekly_routine"][0]["day_label"], "Day 1")
+        self.assertIn("천천히 앉았다가", parsed["weekly_routine"][0]["exercises"][0]["how_to"])
+        self.assertIn("무릎 방향", parsed["weekly_routine"][0]["exercises"][0]["tips"])
         self.assertEqual(parsed["pc3_payload"]["weekly_routine"], parsed["weekly_routine"])
 
     def test_parse_profile_routine_json_rejects_empty_routine_response(self):
@@ -411,8 +464,8 @@ class PC2ApiTests(unittest.TestCase):
         raw = (
             '{"summary":"주간 루틴입니다.","weekly_focus":"하체 안정성 유지",'
             '"weekly_routine":['
-            '{"day_index":1,"day_label":"Day 1","focus":"하체와 코어","exercises":[{"exercise":"squat","sets":3,"reps":12,"rest_sec":60,"focus":"둔근 활성화","reason":"무릎 부담을 줄입니다."}]},'
-            '{"day_index":2,"day_label":"Day 2","focus":"상체","exercises":[{"exercise":"pushup","sets":3,"reps":10,"rest_sec":60,"focus":"상체 안정성","reason":"기초 상체 근력 유지에 적합합니다."}]}'
+            '{"day_index":1,"day_label":"Day 1","focus":"하체와 코어","exercises":[{"exercise":"squat","sets":3,"reps":12,"rest_sec":60,"focus":"둔근 활성화","reason":"무릎 부담을 줄입니다.","how_to":"발을 어깨너비로 벌리고 엉덩이를 뒤로 빼며 천천히 앉았다가 올라옵니다.","tips":"발바닥 전체로 밀고 무릎 방향을 발끝과 맞춥니다."}]},'
+            '{"day_index":2,"day_label":"Day 2","focus":"상체","exercises":[{"exercise":"pushup","sets":3,"reps":10,"rest_sec":60,"focus":"상체 안정성","reason":"기초 상체 근력 유지에 적합합니다.","how_to":"손을 어깨보다 약간 넓게 두고 몸통을 곧게 유지한 채 내려갔다가 밀어 올립니다.","tips":"허리가 꺾이지 않게 복부 힘을 유지합니다."}]}'
             '],"cautions":[]}'
         )
         with self.assertRaises(ValueError) as ctx:
@@ -430,7 +483,7 @@ class PC2ApiTests(unittest.TestCase):
         raw = (
             '{"summary":"주간 루틴입니다.","weekly_focus":"하체 안정성 유지",'
             '"weekly_routine":[{"day_index":1,"day_label":"Day 1","focus":"하체와 코어",'
-            '"exercises":[{"exercise":"bridge","sets":3,"reps":12,"rest_sec":60,"focus":"둔근 활성화","reason":"무릎 부담을 줄입니다."}]}],'
+            '"exercises":[{"exercise":"bridge","sets":3,"reps":12,"rest_sec":60,"focus":"둔근 활성화","reason":"무릎 부담을 줄입니다.","how_to":"발을 바닥에 두고 엉덩이를 들어 올린 뒤 천천히 내립니다.","tips":"허리보다 엉덩이 수축에 집중합니다."}]}],'
             '"cautions":["무릎 통증 시 강도 조절"]}'
         )
         with self.assertRaises(ValueError) as ctx:

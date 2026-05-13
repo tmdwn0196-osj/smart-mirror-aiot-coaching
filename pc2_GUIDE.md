@@ -36,7 +36,7 @@ PC2는 운동 세션 기반 계획 생성과 프로필 기반 주간 루틴 생�
 - `pc2_coach_server/scripts/`
   실행 및 스모크 테스트 스크립트
 - `pc2_coach_server/data/`
-  SQLite DB 등 로컬 데이터
+  로컬 데이터 및 보조 파일
 - `prompt/`
   발표/정리용 문서와 다이어그램
 
@@ -57,11 +57,12 @@ PC2는 운동 세션 기반 계획 생성과 프로필 기반 주간 루틴 생�
 
 ## 3. 실행 방법
 
-프로젝트 표준 실행은 `fallback vLLM Docker`와 `PC2 API`를 함께 올리는 방식입니다.
+프로젝트 표준 실행은 `PostgreSQL Docker`, `fallback vLLM Docker`, `PC2 API`를 함께 올리는 방식입니다.
 
 ```bash
 cd /home/osj/smart-mirror-aiot-coaching/pc2_coach_server
 cp .env.example .env
+docker compose -f docker-compose.postgres.yml up -d
 docker compose -f docker-compose.vllm.yml up -d
 ./scripts/run_pc2.sh
 ```
@@ -69,28 +70,33 @@ docker compose -f docker-compose.vllm.yml up -d
 기본 실행 주소:
 
 - `http://0.0.0.0:7000`
+- PostgreSQL: `postgresql+psycopg://pc2:pc2pass@127.0.0.1:5430/pc2_coach`
 - fallback vLLM: `http://127.0.0.1:8000/v1`
 
 상태 확인:
 
 ```bash
 curl http://127.0.0.1:7000/health
+docker compose -f docker-compose.postgres.yml ps
 curl http://127.0.0.1:8000/v1/models
 ```
 
 실행 순서:
 
 1. `pc2_coach_server/.env` 준비
-2. `docker compose -f docker-compose.vllm.yml up -d`로 fallback vLLM 실행
-3. `./scripts/run_pc2.sh`로 PC2 API 실행
-4. `7000`, `8000` health 확인
+2. `docker compose -f docker-compose.postgres.yml up -d`로 PostgreSQL 실행
+3. `docker compose -f docker-compose.vllm.yml up -d`로 fallback vLLM 실행
+4. `./scripts/run_pc2.sh`로 PC2 API 실행
+5. `5430`, `7000`, `8000` 상태 확인
 
 참고:
 
 - `7000`은 PC2 API 포트입니다.
+- `5430`는 PostgreSQL Docker 포트입니다.
 - `8000`은 fallback vLLM Docker 포트입니다.
 - fallback vLLM 모델 기준값은 `Qwen/Qwen2.5-1.5B-Instruct-AWQ`입니다.
 - 표준 `.env.example`은 `FALLBACK_LLM_ENABLED=true` 기준입니다.
+- `DATABASE_URL`은 PostgreSQL 연결 문자열입니다.
 - `/api/routine/profile`은 primary LLM 전용이라 fallback vLLM이 아니라 `PRIMARY_LLM_*` 설정을 사용합니다.
 
 ## 4. 환경변수 처리 방식
@@ -111,7 +117,7 @@ curl http://127.0.0.1:8000/v1/models
 - `HOST=0.0.0.0`
 - `PORT=7000`
 - `SERVICE_NAME=pc2-coach-api`
-- `DB_PATH=./data/pc2_coach.db`
+- `DATABASE_URL=postgresql+psycopg://pc2:pc2pass@127.0.0.1:5430/pc2_coach`
 - `PRIMARY_LLM_BASE_URL=https://integrate.api.nvidia.com/v1`
 - `PRIMARY_LLM_MODEL_NAME=google/gemma-4-31b-it`
 
@@ -246,9 +252,12 @@ PC3는 원본 이미지가 아니라 구조화된 운동 feature만 PC2로 보�
 프로필 기반 루틴 생성 호출 규칙:
 
 - PC1 프론트의 사용자 목표, 운동 경험, 주당 운동 가능 횟수, 제한 부위를 PC3가 그대로 전달
+- 가능하면 `user_id`, `profile_name`, `weight_kg`, `user_goal`, `exercise_experience`, `available_days_per_week`, `restricted_body_parts`, `start_date`, `purpose`를 그대로 전달
 - `POST /api/routine/profile` 사용
+- `start_date`가 있으면 Day 1 시작일로 사용하고, 없으면 PC2 서버 기준 오늘 날짜를 사용
 - `features.exercise`, `mode`, `event`는 보내지 않음
 - 실패 시 fallback 응답이 아니라 `503` 오류 JSON을 받음
+- 특정 날짜 루틴이 필요하면 `GET /api/routine/profile/{user_id}/day?target_date=YYYY-MM-DD`로 조회
 
 요청 예시:
 
@@ -261,7 +270,8 @@ PC3는 원본 이미지가 아니라 구조화된 운동 feature만 PC2로 보�
   "exercise_experience": "꾸준히 운동함",
   "available_days_per_week": 5,
   "restricted_body_parts": [],
-  "purpose": "프로필 기반 주간 루틴 추천"
+  "purpose": "프로필 기반 주간 루틴 추천",
+  "start_date": "2026-05-13"
 }
 ```
 
@@ -290,7 +300,7 @@ PC2는 다음 정보를 반환합니다.
 
 ## 9. DB에 저장되는 내용
 
-PC2는 `/api/coach/generate` 생성 이력을 SQLite에 저장합니다.
+PC2는 `/api/coach/generate` 생성 이력을 PostgreSQL에 저장합니다.
 `/api/routine/profile`은 현재 coach log DB에 저장하지 않고 서버 로그에 성공/실패 사유만 남깁니다.
 
 저장 항목:

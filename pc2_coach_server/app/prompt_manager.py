@@ -125,15 +125,50 @@ def build_profile_routine_prompt(profile_payload: dict[str, Any]) -> tuple[str, 
         "weekly_routine은 available_days_per_week 이하 개수로 작성한다. "
         "각 day는 day_index, day_label, focus, exercises만 포함한다. "
         "각 day의 exercises는 1~2개만 작성한다. "
-        "각 exercise item은 exercise, sets, focus, reason을 반드시 포함한다. "
+        "각 exercise item은 exercise, sets, focus, reason, how_to, tips를 반드시 포함한다. "
         "반복 운동이면 reps를 넣고, 시간 운동이면 duration_sec를 넣는다. "
         "rest_sec는 가능하면 함께 넣는다. "
-        "reason은 25자 안팎의 짧은 한 문장으로 쓴다. "
+        "reason은 운동 선택 이유를 20~40자 한 문장으로 쓴다. "
+        "how_to는 자세와 동작 순서를 설명하는 45~90자 한두 문장으로 쓴다. "
+        "tips는 호흡, 속도, 정렬 같은 핵심 요령을 20~50자 한 문장으로 쓴다. "
         "cautions는 1~2개만 작성한다. "
         "절대로 pc3_payload, user_id, profile_name 같은 추가 key를 넣지 않는다. "
         "JSON은 반드시 완전히 닫힌 형태로 끝내고 마지막 문자도 } 이어야 한다. "
         "예시 구조: "
-        "{\"summary\":\"...\",\"weekly_focus\":\"...\",\"weekly_routine\":[{\"day_index\":1,\"day_label\":\"Day 1\",\"focus\":\"...\",\"exercises\":[{\"exercise\":\"...\",\"sets\":3,\"reps\":10,\"duration_sec\":null,\"rest_sec\":60,\"focus\":\"...\",\"reason\":\"...\"}]}],\"cautions\":[\"...\"]} "
-        + json.dumps(profile_payload, ensure_ascii=False, separators=(",", ":"))
+        "{\"summary\":\"...\",\"weekly_focus\":\"...\",\"weekly_routine\":[{\"day_index\":1,\"day_label\":\"Day 1\",\"focus\":\"...\",\"exercises\":[{\"exercise\":\"...\",\"sets\":3,\"reps\":10,\"duration_sec\":null,\"rest_sec\":60,\"focus\":\"...\",\"reason\":\"...\",\"how_to\":\"...\",\"tips\":\"...\"}]}],\"cautions\":[\"...\"]} "
+        + json.dumps(profile_payload, ensure_ascii=False, separators=(",", ":"), default=str)
+    )
+    return PROFILE_ROUTINE_SYSTEM_PROMPT, user_prompt
+
+
+def build_profile_routine_day_prompt(
+    profile_payload: dict[str, Any],
+    weekly_outline: dict[str, Any],
+    day_outline: dict[str, Any],
+) -> tuple[str, str]:
+    allowed_exercises = ", ".join(EXERCISE_TYPE_VALUES)
+    prompt_payload = {
+        "profile": profile_payload,
+        "weekly_outline": weekly_outline,
+        "target_day": day_outline,
+    }
+    user_prompt = (
+        "/no_think\n"
+        "아래 정보만 사용해서 정확히 하나의 JSON 객체를 작성한다. "
+        f"exercise는 반드시 {allowed_exercises} 중 하나만 사용한다. "
+        "반드시 day_index, day_label, focus, exercises만 포함한다. "
+        "day_index와 day_label은 target_day와 동일하게 유지한다. "
+        "focus는 target_day의 방향을 유지하되 더 구체적으로 작성한다. "
+        "exercises는 1~2개만 작성한다. "
+        "각 exercise item은 exercise, sets, focus, reason, how_to, tips를 반드시 포함한다. "
+        "반복 운동이면 reps를 넣고, 시간 운동이면 duration_sec를 넣는다. "
+        "rest_sec는 가능하면 함께 넣는다. "
+        "reason은 운동 선택 이유를 20~40자 한 문장으로 쓴다. "
+        "how_to는 자세와 동작 순서를 설명하는 45~90자 한두 문장으로 쓴다. "
+        "tips는 호흡, 속도, 정렬 같은 핵심 요령을 20~50자 한 문장으로 쓴다. "
+        "JSON은 반드시 완전히 닫힌 형태로 끝내고 마지막 문자도 } 이어야 한다. "
+        "예시 구조: "
+        "{\"day_index\":1,\"day_label\":\"Day 1\",\"focus\":\"...\",\"exercises\":[{\"exercise\":\"...\",\"sets\":3,\"reps\":10,\"duration_sec\":null,\"rest_sec\":60,\"focus\":\"...\",\"reason\":\"...\",\"how_to\":\"...\",\"tips\":\"...\"}]} "
+        + json.dumps(prompt_payload, ensure_ascii=False, separators=(",", ":"), default=str)
     )
     return PROFILE_ROUTINE_SYSTEM_PROMPT, user_prompt

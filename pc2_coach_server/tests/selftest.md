@@ -28,8 +28,10 @@ PC3는 사용하지 않는다. PC3가 보낼 JSON을 직접 PC2에 POST해서 �
 ## 2. 사전 조건
 
 - Python 실행 환경이 준비되어 있어야 한다.
-- SQLite 파일을 생성할 수 있어야 한다.
+- PostgreSQL Docker가 실행 가능해야 한다.
+- `DATABASE_URL`이 PostgreSQL로 설정되어 있어야 한다.
 - 포트 `7000`을 사용할 수 있어야 한다.
+- 포트 `5430`을 사용할 수 있어야 한다.
 - fallback vLLM Docker를 함께 검증하려면 포트 `8000`과 Docker/GPU 실행 환경이 준비되어 있어야 한다.
 
 권장 실행 위치:
@@ -44,6 +46,7 @@ cd /home/osj/smart-mirror-aiot-coaching/pc2_coach_server
 
 ```bash
 cp .env.example .env
+docker compose -f docker-compose.postgres.yml up -d
 docker compose -f docker-compose.vllm.yml up -d
 ./scripts/run_pc2.sh
 ```
@@ -60,6 +63,7 @@ health 확인:
 
 ```bash
 curl http://127.0.0.1:7000/health
+docker compose -f docker-compose.postgres.yml ps
 curl http://127.0.0.1:8000/v1/models
 ```
 

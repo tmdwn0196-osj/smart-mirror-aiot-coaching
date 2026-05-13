@@ -264,7 +264,7 @@ coach_client.py"]
     end
 
     BDB[("Baseline DB
-JSON / SQLite")]
+PostgreSQL")]
 
     subgraph PC2["🤖 PC2  로컬 LLM 서버"]
         direction TB
@@ -723,7 +723,7 @@ feature만 받음"]
       <div class="principle-card yellow">
         <div class="principle-label">원칙 6</div>
         <div class="principle-value">인메모리 상태 관리</div>
-        <div class="principle-desc">MemoryStore가 세션/feature/result를 메모리에서 관리. Baseline DB(JSON/SQLite)는 영속성이 필요한 평소 상태만 저장.</div>
+        <div class="principle-desc">MemoryStore가 세션/feature/result를 메모리에서 관리. Baseline DB(PostgreSQL)는 영속성이 필요한 평소 상태만 저장.</div>
       </div>
     </div>
     <div class="section-label" style="padding:16px 24px 8px;">구현 현황 — 코드 vs 다이어그램 갭 분석</div>

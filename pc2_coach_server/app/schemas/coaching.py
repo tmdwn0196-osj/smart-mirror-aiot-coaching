@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -149,6 +150,8 @@ class ExercisePlanItem(ContractModel):
     rest_sec: int | None = Field(default=None, ge=0, le=600)
     focus: str
     reason: str
+    how_to: str = ""
+    tips: str = ""
 
 
 class PC2Payload(ContractModel):
@@ -174,6 +177,7 @@ class RoutineProfileRequest(ContractModel):
     available_days_per_week: int = Field(ge=1, le=7)
     restricted_body_parts: list[str] = Field(default_factory=list)
     purpose: str | None = None
+    start_date: date | None = None
 
 
 class WeeklyRoutineDay(ContractModel):
@@ -201,8 +205,24 @@ class RoutineProfileRecord(ContractModel):
     available_days_per_week: int = Field(ge=1, le=7)
     restricted_body_parts: list[str] = Field(default_factory=list)
     purpose: str | None = None
+    start_date: str | None = None
+    scheduled_dates: list[str] = Field(default_factory=list)
     routine_response: RoutineProfileResponse
     source_model: str
     llm_route: str | None = None
     status: str
     created_at: str
+
+
+class RoutineProfileDayRecord(ContractModel):
+    routine_id: str
+    user_id: str
+    scheduled_date: str
+    day_index: int = Field(ge=1, le=7)
+    day_label: str
+    focus: str
+    exercises: list[ExercisePlanItem] = Field(default_factory=list)
+    summary: str
+    weekly_focus: str
+    message: str
+    created_at: str | None = None

@@ -1,13 +1,11 @@
 import os
-from pathlib import Path
 
 from dotenv import load_dotenv
 
 
-BASE_DIR = Path(__file__).resolve().parents[1]
-DATA_DIR = BASE_DIR / "data"
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-load_dotenv(BASE_DIR / ".env")
+load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 
 def _env(name: str, default: str) -> str:
@@ -95,11 +93,13 @@ LLM_MAX_RETRIES = _env_int(["LLM_MAX_RETRIES", "VLLM_MAX_RETRIES"], 1)
 LLM_MAX_TOKENS = _env_int(["LLM_MAX_TOKENS", "VLLM_MAX_TOKENS"], 500)
 ROUTINE_PROFILE_MAX_TOKENS = _env_int(
     ["ROUTINE_PROFILE_MAX_TOKENS"],
-    max(1200, LLM_MAX_TOKENS),
+    max(1800, LLM_MAX_TOKENS),
 )
 LLM_TEMPERATURE = _env_float(["LLM_TEMPERATURE", "VLLM_TEMPERATURE"], 0.3)
 
-DB_PATH = Path(_env("DB_PATH", str(DATA_DIR / "pc2_coach.db")))
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+if not DATABASE_URL:
+    DATABASE_URL = "postgresql+psycopg://pc2:pc2pass@127.0.0.1:5430/pc2_coach"
 SERVICE_NAME = _env("SERVICE_NAME", "pc2-coach-api")
 HOST = _env("HOST", "0.0.0.0")
 PORT = _env_int(["PORT"], 7000)

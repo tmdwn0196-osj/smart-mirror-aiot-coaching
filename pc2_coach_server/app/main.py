@@ -1,3 +1,4 @@
+from datetime import date
 import logging
 from contextlib import asynccontextmanager
 
@@ -12,6 +13,7 @@ from app.schemas import (
     ExerciseBaselineRecord,
     FeaturePayload,
     RoutineProfileRequest,
+    RoutineProfileDayRecord,
     RoutineProfileRecord,
     RoutineProfileResponse,
 )
@@ -19,6 +21,7 @@ from app.services import (
     create_baseline_record,
     generate_coaching_response,
     generate_profile_routine_response,
+    get_profile_routine_day_record,
     get_profile_routine_record,
 )
 
@@ -78,6 +81,11 @@ def generate_profile_routine(payload: RoutineProfileRequest) -> dict:
 @app.get("/api/routine/profile/{user_id}", response_model=RoutineProfileRecord)
 def get_profile_routine(user_id: str) -> dict:
     return get_profile_routine_record(user_id)
+
+
+@app.get("/api/routine/profile/{user_id}/day", response_model=RoutineProfileDayRecord)
+def get_profile_routine_day(user_id: str, target_date: date = Query(...)) -> dict:
+    return get_profile_routine_day_record(user_id, target_date)
 
 
 @app.get("/api/coach/logs/{user_id}")

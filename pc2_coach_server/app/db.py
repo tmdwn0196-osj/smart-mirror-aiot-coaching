@@ -1,17 +1,13 @@
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
-from sqlalchemy import Column, DateTime, Integer, MetaData, String, Table, Text, create_engine, select
+from sqlalchemy import Column, Date, DateTime, Integer, MetaData, String, Table, Text, create_engine, inspect, select
 
-from app.config import DB_PATH
+from app.config import DATABASE_URL
 
 
-engine = create_engine(
-    f"sqlite:///{DB_PATH}",
-    connect_args={"check_same_thread": False},
-    future=True,
-)
+engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
 metadata = MetaData()
 
 coach_logs = Table(
@@ -67,10 +63,27 @@ profile_routines = Table(
     Column("available_days_per_week", Integer, nullable=False),
     Column("restricted_body_parts_json", Text, nullable=False, default="[]"),
     Column("purpose", Text, nullable=True),
+    Column("start_date", Date, nullable=True),
     Column("routine_response_json", Text, nullable=False),
     Column("source_model", String(255), nullable=False),
     Column("llm_route", String(32), nullable=True),
     Column("status", String(32), nullable=False, default="generated"),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
+profile_routine_days = Table(
+    "profile_routine_days",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("routine_id", String(128), nullable=False, index=True),
+    Column("user_id", String(128), nullable=False, index=True),
+    Column("scheduled_date", Date, nullable=False, index=True),
+    Column("day_index", Integer, nullable=False),
+    Column("day_label", String(64), nullable=False),
+    Column("focus", Text, nullable=False),
+    Column("summary", Text, nullable=False),
+    Column("weekly_focus", Text, nullable=False),
+    Column("day_routine_json", Text, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
 
@@ -89,47 +102,55 @@ def _loads(value: str | None, default: Any = None) -> Any:
     return json.loads(value)
 
 
-def _add_col(conn, cols: set[str], name: str, sql_type: str, default: str | None = None) -> None:
-    if name in cols:
-        return
-    sql = f"ALTER TABLE coach_logs ADD COLUMN {name} {sql_type}"
-    if default is not None:
-        sql += f" NOT NULL DEFAULT '{default}'"
-    conn.exec_driver_sql(sql)
-
-
 def init_db() -> None:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     metadata.create_all(engine)
     _ensure_coach_log_columns()
+    _ensure_profile_routine_columns()
 
 
 def _ensure_coach_log_columns() -> None:
+    cols = {column["name"] for column in inspect(engine).get_columns("coach_logs")}
     with engine.begin() as conn:
-        cols = set()
-        for row in conn.exec_driver_sql("PRAGMA table_info(coach_logs)").fetchall():
-            cols.add(row[1])
-
-        _add_col(conn, cols, "rag_evidence_json", "TEXT", "[]")
         if "rag_evidence_json" not in cols:
-            cols.add("rag_evidence_json")
-
+            conn.exec_driver_sql("ALTER TABLE coach_logs ADD COLUMN IF NOT EXISTS rag_evidence_json TEXT NOT NULL DEFAULT '[]'")
         if "analysis_context_json" not in cols:
-            _add_col(conn, cols, "analysis_context_json", "TEXT", "[]")
+            conn.exec_driver_sql(
+                "ALTER TABLE coach_logs ADD COLUMN IF NOT EXISTS analysis_context_json TEXT NOT NULL DEFAULT '[]'"
+            )
             if "rag_evidence_json" in cols:
                 conn.exec_driver_sql(
-                    "UPDATE coach_logs SET analysis_context_json = COALESCE(rag_evidence_json, '[]')"
+                    "UPDATE coach_logs SET analysis_context_json = COALESCE(rag_evidence_json, '[]') "
+                    "WHERE analysis_context_json IS NULL OR analysis_context_json = '[]'"
                 )
-            cols.add("analysis_context_json")
+        if "baseline_snapshot_json" not in cols:
+            conn.exec_driver_sql(
+                "ALTER TABLE coach_logs ADD COLUMN IF NOT EXISTS baseline_snapshot_json TEXT NOT NULL DEFAULT '{}'"
+            )
+        if "routine_snapshot_json" not in cols:
+            conn.exec_driver_sql(
+                "ALTER TABLE coach_logs ADD COLUMN IF NOT EXISTS routine_snapshot_json TEXT NOT NULL DEFAULT '{}'"
+            )
+        if "pc2_output_json" not in cols:
+            conn.exec_driver_sql(
+                "ALTER TABLE coach_logs ADD COLUMN IF NOT EXISTS pc2_output_json TEXT NOT NULL DEFAULT '{}'"
+            )
+        if "llm_route" not in cols:
+            conn.exec_driver_sql("ALTER TABLE coach_logs ADD COLUMN IF NOT EXISTS llm_route TEXT")
+        if "fallback_used" not in cols:
+            conn.exec_driver_sql("ALTER TABLE coach_logs ADD COLUMN IF NOT EXISTS fallback_used INTEGER")
+        if "primary_error" not in cols:
+            conn.exec_driver_sql("ALTER TABLE coach_logs ADD COLUMN IF NOT EXISTS primary_error TEXT")
+        if "is_duplicate_session" not in cols:
+            conn.exec_driver_sql("ALTER TABLE coach_logs ADD COLUMN IF NOT EXISTS is_duplicate_session INTEGER")
+        if "duplicate_of_request_id" not in cols:
+            conn.exec_driver_sql("ALTER TABLE coach_logs ADD COLUMN IF NOT EXISTS duplicate_of_request_id TEXT")
 
-        _add_col(conn, cols, "baseline_snapshot_json", "TEXT", "{}")
-        _add_col(conn, cols, "routine_snapshot_json", "TEXT", "{}")
-        _add_col(conn, cols, "pc2_output_json", "TEXT", "{}")
-        _add_col(conn, cols, "llm_route", "TEXT")
-        _add_col(conn, cols, "fallback_used", "INTEGER")
-        _add_col(conn, cols, "primary_error", "TEXT")
-        _add_col(conn, cols, "is_duplicate_session", "INTEGER")
-        _add_col(conn, cols, "duplicate_of_request_id", "TEXT")
+
+def _ensure_profile_routine_columns() -> None:
+    cols = {column["name"] for column in inspect(engine).get_columns("profile_routines")}
+    with engine.begin() as conn:
+        if "start_date" not in cols:
+            conn.exec_driver_sql("ALTER TABLE profile_routines ADD COLUMN IF NOT EXISTS start_date DATE")
 
 
 def find_existing_session_log(user_id: str, session_id: str | None) -> dict[str, Any] | None:
@@ -308,6 +329,7 @@ def save_profile_routine(
     available_days_per_week: int,
     restricted_body_parts: list[str],
     purpose: str | None,
+    start_date: date | None,
     routine_response_json: dict[str, Any],
     source_model: str,
     llm_route: str | None,
@@ -326,6 +348,7 @@ def save_profile_routine(
                 available_days_per_week=available_days_per_week,
                 restricted_body_parts_json=_dumps(restricted_body_parts),
                 purpose=purpose,
+                start_date=start_date,
                 routine_response_json=_dumps(routine_response_json),
                 source_model=source_model,
                 llm_route=llm_route,
@@ -333,6 +356,49 @@ def save_profile_routine(
                 created_at=_now(),
             )
         )
+
+
+def save_profile_routine_days(
+    *,
+    routine_id: str,
+    user_id: str,
+    summary: str,
+    weekly_focus: str,
+    weekly_routine: list[dict[str, Any]],
+    start_date: date,
+) -> list[str]:
+    init_db()
+    scheduled_dates: list[str] = []
+    with engine.begin() as conn:
+        for index, day in enumerate(weekly_routine):
+            scheduled_date = date.fromordinal(start_date.toordinal() + index)
+            scheduled_dates.append(scheduled_date.isoformat())
+            conn.execute(
+                profile_routine_days.insert().values(
+                    routine_id=routine_id,
+                    user_id=user_id,
+                    scheduled_date=scheduled_date,
+                    day_index=day["day_index"],
+                    day_label=day["day_label"],
+                    focus=day["focus"],
+                    summary=summary,
+                    weekly_focus=weekly_focus,
+                    day_routine_json=_dumps(day),
+                    created_at=_now(),
+                )
+            )
+    return scheduled_dates
+
+
+def _get_scheduled_dates_by_routine_id(routine_id: str) -> list[str]:
+    stmt = (
+        select(profile_routine_days.c.scheduled_date)
+        .where(profile_routine_days.c.routine_id == routine_id)
+        .order_by(profile_routine_days.c.scheduled_date.asc())
+    )
+    with engine.begin() as conn:
+        rows = conn.execute(stmt).fetchall()
+    return [row[0].isoformat() for row in rows if row and row[0] is not None]
 
 
 def get_latest_profile_routine(user_id: str) -> dict[str, Any] | None:
@@ -361,9 +427,41 @@ def get_latest_profile_routine(user_id: str) -> dict[str, Any] | None:
         "available_days_per_week": data["available_days_per_week"],
         "restricted_body_parts": _loads(data.get("restricted_body_parts_json"), default=[]),
         "purpose": data.get("purpose"),
+        "start_date": data["start_date"].isoformat() if data.get("start_date") else None,
+        "scheduled_dates": _get_scheduled_dates_by_routine_id(data["routine_id"]),
         "routine_response": _loads(data.get("routine_response_json"), default={}),
         "source_model": data["source_model"],
         "llm_route": data.get("llm_route"),
         "status": data.get("status") or "generated",
+        "created_at": data["created_at"].isoformat() if data.get("created_at") else None,
+    }
+
+
+def get_profile_routine_day_by_date(user_id: str, target_date: date) -> dict[str, Any] | None:
+    init_db()
+    stmt = (
+        select(profile_routine_days)
+        .where(profile_routine_days.c.user_id == user_id)
+        .where(profile_routine_days.c.scheduled_date == target_date)
+        .order_by(profile_routine_days.c.created_at.desc())
+        .limit(1)
+    )
+    with engine.begin() as conn:
+        row = conn.execute(stmt).fetchone()
+    if row is None:
+        return None
+
+    data = dict(row._mapping)
+    day_routine = _loads(data["day_routine_json"], default={})
+    return {
+        "routine_id": data["routine_id"],
+        "user_id": data["user_id"],
+        "scheduled_date": data["scheduled_date"].isoformat() if data.get("scheduled_date") else None,
+        "day_index": data["day_index"],
+        "day_label": data["day_label"],
+        "focus": data["focus"],
+        "exercises": day_routine.get("exercises") or [],
+        "summary": data["summary"],
+        "weekly_focus": data["weekly_focus"],
         "created_at": data["created_at"].isoformat() if data.get("created_at") else None,
     }

@@ -1,5 +1,6 @@
-from time import perf_counter
 import re
+from datetime import date
+from time import perf_counter
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -8,10 +9,12 @@ from app.config import FALLBACK_LLM_ENABLED
 from app.db import (
     find_existing_session_log,
     get_latest_baseline,
+    get_profile_routine_day_by_date,
     get_latest_profile_routine,
     save_coach_log,
     save_exercise_baseline,
     save_profile_routine,
+    save_profile_routine_days,
 )
 from app.exercise_planning import build_baseline_diff, build_baseline_profile, retrieve_analysis_context
 from app.llm_client import (
@@ -22,14 +25,14 @@ from app.llm_client import (
     is_fallback_llm_configured,
     is_primary_llm_configured,
 )
-from app.output_validator import parse_coaching_json
-from app.output_validator import parse_profile_routine_json
-from app.prompt_manager import build_coach_prompt, build_profile_routine_prompt
+from app.output_validator import parse_coaching_json, parse_profile_routine_day_json, parse_profile_routine_json
+from app.prompt_manager import build_coach_prompt, build_profile_routine_day_prompt, build_profile_routine_prompt
 from app.schemas import (
     BaselineDiff,
     ExerciseBaselineCreateRequest,
     ExerciseBaselineProfile,
     FeaturePayload,
+    RoutineProfileDayRecord,
     RoutineProfileRequest,
     RoutineProfileRecord,
 )
@@ -69,6 +72,56 @@ def select_plan_name(exercise_type: str) -> str:
         "pushup": "push-up",
     }
     return names.get(exercise_type, exercise_type or "exercise")
+
+
+def _resolve_routine_start_date(payload: RoutineProfileRequest) -> date:
+    return payload.start_date or date.today()
+
+
+def _build_routine_day_message(day: dict) -> str:
+    exercise_names = [str(item.get("exercise") or "").strip() for item in day.get("exercises") or [] if item.get("exercise")]
+    if not exercise_names:
+        return f"오늘은 {day.get('focus') or '운동'} 루틴을 진행할 예정입니다."
+    exercise_line = ", ".join(exercise_names[:2])
+    return f"오늘은 {day.get('focus') or '운동'} 루틴으로 {exercise_line}를 진행할 예정입니다."
+
+
+def _expand_profile_routine_days(
+    payload: RoutineProfileRequest,
+    routine_response: dict,
+    logger,
+    request_id: str,
+) -> list[dict]:
+    profile_payload = dump_model(payload)
+    weekly_outline = {
+        "summary": routine_response.get("summary"),
+        "weekly_focus": routine_response.get("weekly_focus"),
+        "cautions": routine_response.get("cautions") or [],
+        "available_days_per_week": payload.available_days_per_week,
+        "restricted_body_parts": payload.restricted_body_parts,
+    }
+
+    expanded_days: list[dict] = []
+    for day in routine_response.get("weekly_routine") or []:
+        system_prompt, user_prompt = build_profile_routine_day_prompt(
+            profile_payload,
+            weekly_outline,
+            day,
+        )
+        try:
+            llm_result = call_primary_profile_routine_llm(system_prompt, user_prompt)
+            expanded_day = parse_profile_routine_day_json(llm_result["content"], day["day_index"], day)
+            expanded_days.append(expanded_day)
+        except Exception as exc:
+            logger.warning(
+                "profile_routine_day_detail_failed request_id=%s user_id=%s day_index=%s error=%s",
+                request_id,
+                payload.user_id,
+                day.get("day_index"),
+                exc,
+            )
+            expanded_days.append(day)
+    return expanded_days
 
 
 def build_local_plan_response(
@@ -522,7 +575,15 @@ def generate_profile_routine_response(payload: RoutineProfileRequest, logger) ->
             },
         ) from exc
 
+    detailed_days = _expand_profile_routine_days(payload, final_response, logger, request_id)
+    final_response["weekly_routine"] = detailed_days
+    final_response["pc3_payload"] = {
+        **(final_response.get("pc3_payload") or {}),
+        "weekly_routine": detailed_days,
+    }
+
     routine_id = f"routine_{uuid4().hex[:12]}"
+    start_date = _resolve_routine_start_date(payload)
     save_profile_routine(
         routine_id=routine_id,
         user_id=payload.user_id,
@@ -533,10 +594,25 @@ def generate_profile_routine_response(payload: RoutineProfileRequest, logger) ->
         available_days_per_week=payload.available_days_per_week,
         restricted_body_parts=payload.restricted_body_parts,
         purpose=payload.purpose,
+        start_date=start_date,
         routine_response_json=final_response,
         source_model=llm_result["model_name"],
         llm_route=llm_result["served_by"],
     )
+    scheduled_dates = save_profile_routine_days(
+        routine_id=routine_id,
+        user_id=payload.user_id,
+        summary=final_response["summary"],
+        weekly_focus=final_response["weekly_focus"],
+        weekly_routine=detailed_days,
+        start_date=start_date,
+    )
+    final_response["pc3_payload"] = {
+        **(final_response.get("pc3_payload") or {}),
+        "routine_id": routine_id,
+        "start_date": start_date.isoformat(),
+        "scheduled_dates": scheduled_dates,
+    }
 
     logger.info(
         "profile_routine_request_success request_id=%s routine_id=%s user_id=%s route=%s days=%s",
@@ -556,3 +632,14 @@ def get_profile_routine_record(user_id: str) -> dict:
     if hasattr(RoutineProfileRecord, "model_validate"):
         return RoutineProfileRecord.model_validate(routine).model_dump()
     return RoutineProfileRecord.parse_obj(routine).dict()
+
+
+def get_profile_routine_day_record(user_id: str, target_date: date) -> dict:
+    routine_day = get_profile_routine_day_by_date(user_id, target_date)
+    if routine_day is None:
+        raise HTTPException(status_code=404, detail="해당 날짜의 루틴을 찾지 못했습니다.")
+
+    routine_day["message"] = _build_routine_day_message(routine_day)
+    if hasattr(RoutineProfileDayRecord, "model_validate"):
+        return RoutineProfileDayRecord.model_validate(routine_day).model_dump()
+    return RoutineProfileDayRecord.parse_obj(routine_day).dict()

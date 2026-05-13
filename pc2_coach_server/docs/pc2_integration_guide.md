@@ -34,6 +34,7 @@ PC3 설정:
 ```env
 PC2_COACH_API_URL=http://<PC2_HOST>:7000/api/coach/generate
 PC2_ROUTINE_PROFILE_API_URL=http://<PC2_HOST>:7000/api/routine/profile
+PC2_ROUTINE_DAY_API_URL=http://<PC2_HOST>:7000/api/routine/profile/{user_id}/day?target_date={YYYY-MM-DD}
 ```
 
 PC2 서버 표준 실행:
@@ -208,6 +209,13 @@ PC3는 PC1 프론트에서 받은 프로필 값을 아래 형식으로 전달합
 - `weight_kg`
 - `restricted_body_parts`
 - `purpose`
+- `start_date`
+
+PC3 전달 규칙:
+
+- PC3는 PC1 프론트에서 받은 프로필 필드를 가능한 한 가공 없이 그대로 전달합니다.
+- `start_date`가 있으면 Day 1 시작일로 사용하기 위해 그대로 전달합니다.
+- `start_date`가 없으면 생략할 수 있으며, 이 경우 PC2가 서버 기준 오늘 날짜를 사용합니다.
 
 예시:
 
@@ -220,7 +228,8 @@ PC3는 PC1 프론트에서 받은 프로필 값을 아래 형식으로 전달합
   "exercise_experience": "꾸준히 운동함",
   "available_days_per_week": 5,
   "restricted_body_parts": [],
-  "purpose": "프로필 기반 주간 루틴 추천"
+  "purpose": "프로필 기반 주간 루틴 추천",
+  "start_date": "2026-05-13"
 }
 ```
 
@@ -239,14 +248,39 @@ PC3는 PC1 프론트에서 받은 프로필 값을 아래 형식으로 전달합
     }
   ],
   "cautions": ["string"],
-  "pc3_payload": {}
+  "pc3_payload": {
+    "routine_id": "string",
+    "start_date": "2026-05-13",
+    "scheduled_dates": ["2026-05-13", "2026-05-14"]
+  }
 }
 ```
 
 `pc3_payload`는 PC2가 top-level 루틴 결과와 요청값을 기준으로 재구성한 루틴 표시용 payload입니다.
-즉 `summary`, `weekly_focus`, `weekly_routine`는 top-level 응답과 일치하고, `available_days_per_week`, `restricted_body_parts`는 요청값이 반영됩니다.
+즉 `summary`, `weekly_focus`, `weekly_routine`는 top-level 응답과 일치하고, `available_days_per_week`, `restricted_body_parts`, `routine_id`, `start_date`, `scheduled_dates`는 PC3/PC1 일정 처리용으로 함께 내려갑니다.
 이 endpoint는 primary LLM 전용이며, primary LLM 미설정/호출 실패/파싱 실패 시 `503`을 반환합니다.
 로컬 fallback 루틴은 생성하지 않습니다.
+
+## 출력: RoutineProfileDayRecord
+
+```http
+GET /api/routine/profile/{user_id}/day?target_date=YYYY-MM-DD
+```
+
+```json
+{
+  "routine_id": "string",
+  "user_id": "exercise_user",
+  "scheduled_date": "2026-05-14",
+  "day_index": 2,
+  "day_label": "Day 2",
+  "focus": "상체 밀기와 코어 고정",
+  "exercises": [],
+  "summary": "string",
+  "weekly_focus": "string",
+  "message": "오늘은 상체 밀기와 코어 고정 루틴으로 pushup를 진행할 예정입니다."
+}
+```
 
 ## PC2 호출 시점
 

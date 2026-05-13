@@ -62,6 +62,8 @@ def _normalize_plan(plan: Any) -> list[dict[str, Any]]:
                 "rest_sec": int(item["rest_sec"]) if item.get("rest_sec") is not None else None,
                 "focus": str(item.get("focus") or ""),
                 "reason": str(item.get("reason") or ""),
+                "how_to": str(item.get("how_to") or ""),
+                "tips": str(item.get("tips") or ""),
             }
         )
     return normalized
@@ -100,6 +102,17 @@ def _normalize_weekly_routine(value: Any) -> list[dict[str, Any]]:
             }
         )
     return weekly_routine
+
+
+def _normalize_routine_day(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError("루틴 day 응답은 객체여야 합니다.")
+    return {
+        "day_index": int(value.get("day_index") or 0),
+        "day_label": str(value.get("day_label") or ""),
+        "focus": str(value.get("focus") or ""),
+        "exercises": _normalize_routine_plan(value.get("exercises")),
+    }
 
 
 def _as_warning_list(value: Any) -> list[str]:
@@ -265,3 +278,28 @@ def parse_profile_routine_json(raw_text: str, base_response: dict[str, Any]) -> 
     if hasattr(RoutineProfileResponse, "model_validate"):
         return RoutineProfileResponse.model_validate(merged).model_dump()
     return RoutineProfileResponse.parse_obj(merged).dict()
+
+
+def parse_profile_routine_day_json(raw_text: str, day_index: int, fallback_day: dict[str, Any]) -> dict[str, Any]:
+    parsed = _extract_json_object(raw_text) if raw_text else None
+    if parsed is None:
+        raise ValueError("LLM 응답에서 JSON 객체를 찾지 못했습니다.")
+
+    if "WeeklyRoutineDay" in parsed and isinstance(parsed.get("WeeklyRoutineDay"), dict):
+        parsed = parsed["WeeklyRoutineDay"]
+
+    normalized = _normalize_routine_day(parsed)
+    if normalized["day_index"] != day_index:
+        raise ValueError("루틴 day 응답의 day_index가 요청값과 일치하지 않습니다.")
+    if not normalized["day_label"]:
+        raise ValueError("루틴 day 응답에는 day_label이 필요합니다.")
+    if not normalized["focus"]:
+        raise ValueError("루틴 day 응답에는 focus가 필요합니다.")
+    if not normalized["exercises"]:
+        raise ValueError("루틴 day 응답에는 최소 1개 이상의 exercise가 필요합니다.")
+    return {
+        "day_index": normalized["day_index"],
+        "day_label": normalized["day_label"],
+        "focus": normalized["focus"],
+        "exercises": normalized["exercises"],
+    }

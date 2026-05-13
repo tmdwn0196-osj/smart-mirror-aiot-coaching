@@ -16,8 +16,99 @@ PC2는 PC3가 보낸 feature, 저장된 baseline, 로컬 운동 지식 검색 �
 - Baseline 저장: `POST http://<PC2_HOST>:7000/api/exercise/baseline`
 - 운동 계획 생성: `POST http://<PC2_HOST>:7000/api/coach/generate`
 - 프로필 기반 루틴 생성: `POST http://<PC2_HOST>:7000/api/routine/profile`
+- 날짜별 루틴 조회: `GET http://<PC2_HOST>:7000/api/routine/profile/{user_id}/day?target_date=YYYY-MM-DD`
 - Health check: `GET http://<PC2_HOST>:7000/health`
 - Debug logs: `GET http://<PC2_HOST>:7000/api/coach/logs/{user_id}?limit=10`
+
+## PC3 DTO 예시
+
+PC3에서 바로 구현할 수 있도록 요청/응답 DTO 예시를 아래처럼 권장합니다.
+
+### PC3 -> PC2 루틴 생성 요청 DTO
+
+```json
+{
+  "user_id": "user_001",
+  "profile_name": "홍길동",
+  "weight_kg": 68,
+  "user_goal": "운동 습관 만들기",
+  "exercise_experience": "초보",
+  "available_days_per_week": 5,
+  "restricted_body_parts": ["무릎"],
+  "start_date": "2026-05-13",
+  "purpose": "프로필 기반 주간 루틴 추천"
+}
+```
+
+### PC2 -> PC3 주간 루틴 응답 DTO
+
+```json
+{
+  "summary": "운동 습관 형성을 위한 주간 루틴입니다.",
+  "weekly_focus": "주 5회 리듬 유지와 전신 밸런스 확보",
+  "weekly_routine": [
+    {
+      "day_index": 1,
+      "day_label": "Day 1",
+      "focus": "하체와 코어",
+      "exercises": [
+        {
+          "exercise": "squat",
+          "sets": 4,
+          "reps": 10,
+          "duration_sec": null,
+          "rest_sec": 75,
+          "focus": "하체 안정성",
+          "reason": "기초 하체 근력 유지에 적합합니다.",
+          "how_to": "발을 어깨너비로 벌리고 엉덩이를 뒤로 빼며 천천히 앉았다가 올라옵니다.",
+          "tips": "발바닥 전체로 밀고 무릎 방향을 발끝과 맞춥니다."
+        }
+      ]
+    }
+  ],
+  "cautions": ["통증이 있으면 강도를 낮추세요."],
+  "pc3_payload": {
+    "routine_id": "routine_abcd1234",
+    "start_date": "2026-05-13",
+    "scheduled_dates": ["2026-05-13", "2026-05-14", "2026-05-15"]
+  }
+}
+```
+
+### PC3 -> PC2 날짜별 루틴 조회 DTO
+
+```http
+GET /api/routine/profile/user_001/day?target_date=2026-05-14
+```
+
+### PC2 -> PC3 날짜별 루틴 응답 DTO
+
+```json
+{
+  "routine_id": "routine_abcd1234",
+  "user_id": "user_001",
+  "scheduled_date": "2026-05-14",
+  "day_index": 2,
+  "day_label": "Day 2",
+  "focus": "상체 밀기와 코어 고정",
+  "exercises": [
+    {
+      "exercise": "pushup",
+      "sets": 3,
+      "reps": 8,
+      "duration_sec": null,
+      "rest_sec": 60,
+      "focus": "상체 볼륨 확보",
+      "reason": "주간 빈도를 유지하기 좋은 난이도입니다.",
+      "how_to": "손을 어깨보다 약간 넓게 두고 몸통을 일직선으로 유지한 채 내려갔다가 밀어 올립니다.",
+      "tips": "복부에 힘을 주고 내려갈 때 들이마시고 밀어낼 때 내쉽니다."
+    }
+  ],
+  "summary": "운동 습관 형성을 위한 주간 루틴입니다.",
+  "weekly_focus": "주 5회 리듬 유지와 전신 밸런스 확보",
+  "message": "오늘은 상체 밀기와 코어 고정 루틴으로 pushup를 진행할 예정입니다."
+}
+```
 
 ## 호출 시점
 
@@ -38,6 +129,26 @@ PC2는 PC3가 보낸 feature, 저장된 baseline, 로컬 운동 지식 검색 �
 
 PC1 프론트에서 사용자가 프로필을 선택하거나 수정한 뒤, PC3가 해당 프로필 값을 그대로 묶어서 호출합니다.
 이 경로는 운동 feature나 baseline 없이도 사용할 수 있으며, primary LLM 기준으로 주간 루틴 JSON을 생성합니다.
+
+PC1 -> PC3 초기 입력 권장값:
+
+- `user_id`
+- `profile_name`
+- `weight_kg`
+- `user_goal`
+- `exercise_experience`
+- `available_days_per_week`
+- `restricted_body_parts`
+- `start_date`
+- `purpose`
+
+PC3 중계 규칙:
+
+- PC3는 PC1에서 받은 위 필드를 `/api/routine/profile` 요청 본문으로 그대로 전달합니다.
+- `start_date`가 있으면 Day 1 시작일로 사용하기 위해 그대로 전달합니다.
+- `start_date`가 없으면 필드를 생략할 수 있으며, 이 경우 PC2가 서버 기준 오늘 날짜를 Day 1로 사용합니다.
+- PC3는 `summary`, `weekly_focus`, `weekly_routine`, `cautions`와 함께 `pc3_payload.routine_id`, `pc3_payload.start_date`, `pc3_payload.scheduled_dates`를 보관하거나 PC1에 전달할 수 있습니다.
+- 특정 날짜 루틴이 필요하면 PC3가 `/api/routine/profile/{user_id}/day?target_date=YYYY-MM-DD`를 다시 조회해 PC1에 전달합니다.
 
 주의:
 
@@ -343,6 +454,7 @@ primary LLM이 설정되지 않았거나 호출/응답 파싱에 실패하면 �
 - `available_days_per_week`: 주당 운동 가능 횟수, 1~7
 - `restricted_body_parts`: 제한 부위 배열, 없으면 `[]`
 - `purpose`: 호출 목적, 선택
+- `start_date`: 루틴 시작 날짜, 선택
 
 ### 프로필 루틴 요청 변수 의미
 
@@ -356,6 +468,7 @@ primary LLM이 설정되지 않았거나 호출/응답 파싱에 실패하면 �
 | `available_days_per_week` | 주당 운동 가능 횟수 | 1~7만 허용합니다. PC2는 응답 `weekly_routine` 일수가 이 값을 초과하면 파싱 실패로 처리합니다. |
 | `restricted_body_parts` | 제한 부위 배열 | 예: `["무릎", "허리"]`. 없으면 `[]`로 보내는 것을 권장합니다. 해당 부위 부담을 낮추는 데 사용합니다. |
 | `purpose` | 호출 목적 설명 | 로그와 프롬프트 참고용 선택 값입니다. |
+| `start_date` | Day 1을 배정할 시작 날짜 | 선택 값입니다. 없으면 PC2 서버 기준 오늘 날짜를 사용합니다. |
 
 ### JSON 예시
 
@@ -368,7 +481,8 @@ primary LLM이 설정되지 않았거나 호출/응답 파싱에 실패하면 �
   "exercise_experience": "꾸준히 운동함",
   "available_days_per_week": 5,
   "restricted_body_parts": [],
-  "purpose": "프로필 기반 주간 루틴 추천"
+  "purpose": "프로필 기반 주간 루틴 추천",
+  "start_date": "2026-05-13"
 }
 ```
 
@@ -385,13 +499,15 @@ primary LLM이 설정되지 않았거나 호출/응답 파싱에 실패하면 �
       "focus": "하체와 코어",
       "exercises": [
         {
-          "exercise": "goblet squat",
+          "exercise": "squat",
           "sets": 4,
           "reps": 10,
           "duration_sec": null,
           "rest_sec": 75,
           "focus": "하체 안정성",
-          "reason": "기초 하체 근력 유지에 적합합니다."
+          "reason": "기초 하체 근력 유지에 적합합니다.",
+          "how_to": "발을 어깨너비로 벌리고 엉덩이를 뒤로 빼며 천천히 앉았다가 올라옵니다.",
+          "tips": "발바닥 전체로 밀고 무릎 방향을 발끝과 맞춥니다."
         }
       ]
     }
@@ -400,6 +516,9 @@ primary LLM이 설정되지 않았거나 호출/응답 파싱에 실패하면 �
   "pc3_payload": {
     "summary": "운동 습관 형성을 위한 주간 루틴입니다.",
     "weekly_focus": "주 5회 리듬 유지와 전신 밸런스 확보",
+    "routine_id": "routine_abcd1234",
+    "start_date": "2026-05-13",
+    "scheduled_dates": ["2026-05-13", "2026-05-14", "2026-05-15"],
     "weekly_routine": [
       {
         "day_index": 1,
@@ -407,13 +526,15 @@ primary LLM이 설정되지 않았거나 호출/응답 파싱에 실패하면 �
         "focus": "하체와 코어",
         "exercises": [
           {
-            "exercise": "goblet squat",
+            "exercise": "squat",
             "sets": 4,
             "reps": 10,
             "duration_sec": null,
             "rest_sec": 75,
             "focus": "하체 안정성",
-            "reason": "기초 하체 근력 유지에 적합합니다."
+            "reason": "기초 하체 근력 유지에 적합합니다.",
+            "how_to": "발을 어깨너비로 벌리고 엉덩이를 뒤로 빼며 천천히 앉았다가 올라옵니다.",
+            "tips": "발바닥 전체로 밀고 무릎 방향을 발끝과 맞춥니다."
           }
         ]
       }
@@ -433,11 +554,45 @@ primary LLM이 설정되지 않았거나 호출/응답 파싱에 실패하면 �
 | `weekly_routine[].day_label` | 화면 표시용 일차 라벨 | 예: `Day 1`, `1일차`. |
 | `weekly_routine[].focus` | 해당 일차의 운동 초점 | 카드 제목 또는 설명으로 사용합니다. |
 | `weekly_routine[].exercises` | 해당 일차 운동 목록 | 기존 `exercise_plan` item과 같은 구조입니다. |
+| `weekly_routine[].exercises[].how_to` | 동작 수행 방법 | 자세 설명/운동 가이드로 표시합니다. |
+| `weekly_routine[].exercises[].tips` | 핵심 요령 | 호흡, 속도, 정렬 팁으로 표시합니다. |
 | `cautions` | 제한 부위 관련 주의사항 | 사용자에게 주의 문구로 표시합니다. |
 | `pc3_payload` | PC3/프론트 전달용 payload | PC2 parser가 top-level 루틴 결과와 요청값을 기준으로 일관되게 재구성합니다. |
+| `pc3_payload.routine_id` | 저장된 주간 루틴 ID | 날짜별 루틴 추적이나 로그 연결 시 사용할 수 있습니다. |
+| `pc3_payload.start_date` | Day 1 시작 날짜 | PC1 캘린더/일정 표시 기준으로 사용합니다. |
+| `pc3_payload.scheduled_dates` | Day별 배정 날짜 목록 | PC1/PC3가 날짜별 루틴 조회 기준으로 사용할 수 있습니다. |
 
 PC3는 이 응답에서 `pc3_payload`를 그대로 프론트에 넘기거나, `summary`, `weekly_focus`, `weekly_routine`, `cautions`만 골라서 가공해도 됩니다.
 현재 이 endpoint는 `/api/coach/logs/{user_id}` 조회 대상이 아니며, 성공/실패 사유는 PC2 서버 로그에 남습니다.
+
+### 날짜별 루틴 조회 응답 예시
+
+```json
+{
+  "routine_id": "routine_abcd1234",
+  "user_id": "exercise_user",
+  "scheduled_date": "2026-05-14",
+  "day_index": 2,
+  "day_label": "Day 2",
+  "focus": "상체 밀기와 코어 고정",
+  "exercises": [
+    {
+      "exercise": "pushup",
+      "sets": 3,
+      "reps": 8,
+      "duration_sec": null,
+      "rest_sec": 60,
+      "focus": "상체 볼륨 확보",
+      "reason": "주간 빈도를 유지하기 좋은 난이도입니다.",
+      "how_to": "손을 어깨보다 약간 넓게 두고 몸통을 일직선으로 유지한 채 내려갔다가 밀어 올립니다.",
+      "tips": "복부에 힘을 주고 내려갈 때 들이마시고 밀어낼 때 내쉽니다."
+    }
+  ],
+  "summary": "운동 습관 형성을 위한 주간 루틴입니다.",
+  "weekly_focus": "주 5회 리듬 유지와 전신 밸런스 확보",
+  "message": "오늘은 상체 밀기와 코어 고정 루틴으로 pushup를 진행할 예정입니다."
+}
+```
 
 ### 실패 응답 예시
 
