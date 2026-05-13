@@ -24,6 +24,15 @@ PC2는 PC3가 보낸 feature, 저장된 baseline, 로컬 운동 지식 검색 �
 
 PC3에서 바로 구현할 수 있도록 요청/응답 DTO 예시를 아래처럼 권장합니다.
 
+## 이번 단계 범위
+
+이번 단계에서는 PC1에서 추가 사용자 정보를 더 수집해 PC2로 넘기지 않습니다.
+즉 `Pc3RoutineCreateRequest`는 현재 문서에 정의된 기존 필드만 유지합니다.
+운동 가능 시간, 선호 강도, 장비, 장소 같은 확장 필드는 이번 범위에서 제외합니다.
+
+특히 `restricted_body_parts`는 유지해야 합니다.
+이 값은 "루틴 작성 시 조심해야 하는 신체 부위 목록"이며, PC2는 이 값을 보고 해당 부위 부담이 큰 동작을 피하거나 강도를 낮추고, `cautions`에도 주의 문구를 추가합니다.
+
 ### PC3 -> PC2 루틴 생성 요청 DTO
 
 ```json
@@ -215,6 +224,7 @@ PC1 -> PC3 초기 입력 권장값:
 PC3 중계 규칙:
 
 - PC3는 PC1에서 받은 위 필드를 `/api/routine/profile` 요청 본문으로 그대로 전달합니다.
+- PC3는 이번 단계에서 문서에 없는 추가 필드를 임의로 붙이지 않습니다.
 - `start_date`가 있으면 Day 1 시작일로 사용하기 위해 그대로 전달합니다.
 - `start_date`가 없으면 필드를 생략할 수 있으며, 이 경우 PC2가 서버 기준 오늘 날짜를 Day 1로 사용합니다.
 - PC3는 `summary`, `weekly_focus`, `weekly_routine`, `cautions`와 함께 `pc3_payload.routine_id`, `pc3_payload.start_date`, `pc3_payload.scheduled_dates`를 보관하거나 PC1에 전달할 수 있습니다.
@@ -251,6 +261,9 @@ PC3는 아래 데이터를 PC2로 보내지 않습니다.
 PC2는 PC3가 계산한 수치형/상태형 feature만 받습니다.
 현재 PC2 요청 스키마는 계약에 없는 extra field를 허용하지 않습니다.
 즉 `landmarks`, `frame_path`뿐 아니라 명세에 없는 어떤 필드라도 들어오면 `422`로 거부됩니다.
+
+프로필 루틴 요청도 동일합니다.
+즉 `available_minutes`, `preferred_intensity`, `equipment`, `location` 같은 필드를 현재 계약 없이 추가하면 `422` 대상이 됩니다.
 
 ## 1. Baseline 저장 요청
 

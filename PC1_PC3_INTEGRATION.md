@@ -30,6 +30,15 @@ PC1 -> PC3 Vision Gateway -> PC2 Coach API
 `start_date`는 선택 값입니다.
 보내면 Day 1 시작 날짜를 직접 지정할 수 있고, 생략하면 PC2 서버 기준 오늘 날짜가 Day 1로 사용됩니다.
 
+## 이번 단계 범위
+
+이번 단계에서는 PC1 요청 JSON에 새로운 사용자 수집 필드를 추가하지 않습니다.
+즉 PC1은 아래 문서에 있는 기존 필드만 보내면 되고, 운동 가능 시간, 선호 강도, 장비, 장소 같은 추가 필드는 수집/전달 대상에서 제외합니다.
+
+중요한 기존 필드는 `restricted_body_parts`입니다.
+이 값은 "조심해야 하는 신체 부위"를 의미하며, 예를 들면 `["무릎"]`, `["허리", "어깨"]`, `[]` 형태로 보냅니다.
+PC2는 이 값을 보고 해당 부위에 부담이 큰 동작을 피하거나 강도를 낮추고, 응답 `cautions`에도 관련 주의 문구를 넣습니다.
+
 ## 1. 주간 루틴 생성 요청
 
 ### PC1 -> PC3 요청 예시
@@ -74,7 +83,7 @@ export interface Pc1RoutineCreateRequest {
 | `user_goal` | 운동 목표 | 예: `체중 감량`, `운동 습관 만들기` |
 | `exercise_experience` | 운동 경험 수준 | 예: `초보`, `꾸준히 운동함` |
 | `available_days_per_week` | 주당 운동 가능 횟수 | 1~7 |
-| `restricted_body_parts` | 제한 부위 배열 | 예: `["무릎", "허리"]` |
+| `restricted_body_parts` | 제한 부위 배열 | 예: `["무릎", "허리"]`. 없으면 `[]`. 해당 부위 부담이 큰 동작을 피하거나 강도를 낮추는 데 사용합니다. |
 | `start_date` | Day 1 시작 날짜 | 선택, `YYYY-MM-DD` |
 | `purpose` | 호출 목적 설명 | 선택 |
 
@@ -235,6 +244,15 @@ export interface Pc1RoutineDayResponse {
 ## 권장 구현 규칙
 
 - PC1은 `start_date`를 캘린더 선택값으로 보낼 수 있게 하는 것이 좋습니다.
+- PC1은 `restricted_body_parts`를 복수 선택 가능한 체크 UI로 두고, 선택이 없으면 `[]`를 보내는 것이 좋습니다.
 - PC1은 `scheduled_dates`를 받아 주간 캘린더 표시 기준으로 사용할 수 있습니다.
 - PC1은 특정 날짜를 눌렀을 때 `target_date`로 PC3에 날짜별 루틴 조회를 요청하면 됩니다.
 - PC1은 `message`를 메인 카드 한 줄 안내 문구로 바로 사용할 수 있습니다.
+
+## PC1 구현 체크리스트
+
+- 기존 요청 JSON 구조는 유지합니다. 이번 단계에서 새 필드는 추가하지 않습니다.
+- 루틴 생성 폼에는 최소 `user_goal`, `exercise_experience`, `available_days_per_week`, `restricted_body_parts`, `start_date` 입력이 있어야 합니다.
+- `restricted_body_parts`는 문자열 배열로 관리해야 합니다. 단일 문자열로 보내면 안 됩니다.
+- 값이 없을 때 `restricted_body_parts`는 `null`보다 `[]`로 보내는 쪽을 권장합니다.
+- 날짜별 루틴을 쓰려면 PC1이 `start_date`, `scheduled_dates`, `target_date`를 화면 상태로 관리해야 합니다.
