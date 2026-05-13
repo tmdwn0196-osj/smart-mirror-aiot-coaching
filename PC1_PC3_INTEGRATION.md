@@ -48,6 +48,22 @@ PC1 -> PC3 Vision Gateway -> PC2 Coach API
 }
 ```
 
+### PC1 -> PC3 TypeScript DTO 예시
+
+```ts
+export interface Pc1RoutineCreateRequest {
+  user_id: string;
+  profile_name?: string;
+  weight_kg?: number;
+  user_goal: string;
+  exercise_experience: string;
+  available_days_per_week: number;
+  restricted_body_parts: string[];
+  start_date?: string;
+  purpose?: string;
+}
+```
+
 ### 필드 의미
 
 | 필드 | 의미 | 비고 |
@@ -97,6 +113,39 @@ PC3는 아래 값을 그대로 전달하거나, 필요한 필드만 골라 가�
 }
 ```
 
+### PC3 -> PC1 주간 루틴 TypeScript DTO 예시
+
+```ts
+export interface Pc1RoutineExercise {
+  exercise: string;
+  sets: number;
+  reps?: number | null;
+  duration_sec?: number | null;
+  rest_sec?: number | null;
+  focus: string;
+  reason: string;
+  how_to: string;
+  tips: string;
+}
+
+export interface Pc1WeeklyRoutineDay {
+  day_index: number;
+  day_label: string;
+  focus: string;
+  exercises: Pc1RoutineExercise[];
+}
+
+export interface Pc1RoutineCreateResponse {
+  summary: string;
+  weekly_focus: string;
+  weekly_routine: Pc1WeeklyRoutineDay[];
+  cautions: string[];
+  routine_id: string;
+  start_date: string;
+  scheduled_dates: string[];
+}
+```
+
 ### PC1이 활용하면 좋은 값
 
 - `summary`
@@ -117,6 +166,15 @@ PC1이 오늘 루틴 또는 임의 날짜 루틴이 필요하면, PC3가 날짜�
 {
   "user_id": "user_001",
   "target_date": "2026-05-14"
+}
+```
+
+### PC1 -> PC3 날짜 조회 TypeScript DTO 예시
+
+```ts
+export interface Pc1RoutineDayRequest {
+  user_id: string;
+  target_date: string;
 }
 ```
 
@@ -146,6 +204,23 @@ PC1이 오늘 루틴 또는 임의 날짜 루틴이 필요하면, PC3가 날짜�
   "summary": "운동 습관 형성을 위한 주간 루틴입니다.",
   "weekly_focus": "주 5회 리듬 유지와 전신 밸런스 확보",
   "message": "오늘은 상체 밀기와 코어 고정 루틴으로 pushup를 진행할 예정입니다."
+}
+```
+
+### PC3 -> PC1 날짜별 루틴 TypeScript DTO 예시
+
+```ts
+export interface Pc1RoutineDayResponse {
+  routine_id: string;
+  user_id: string;
+  scheduled_date: string;
+  day_index: number;
+  day_label: string;
+  focus: string;
+  exercises: Pc1RoutineExercise[];
+  summary: string;
+  weekly_focus: string;
+  message: string;
 }
 ```
 

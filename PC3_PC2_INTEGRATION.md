@@ -40,6 +40,20 @@ PC3에서 바로 구현할 수 있도록 요청/응답 DTO 예시를 아래처�
 }
 ```
 
+```ts
+export interface Pc3RoutineCreateRequest {
+  user_id: string;
+  profile_name?: string;
+  weight_kg?: number;
+  user_goal: string;
+  exercise_experience: string;
+  available_days_per_week: number;
+  restricted_body_parts: string[];
+  start_date?: string;
+  purpose?: string;
+}
+```
+
 ### PC2 -> PC3 주간 루틴 응답 DTO
 
 ```json
@@ -75,10 +89,51 @@ PC3에서 바로 구현할 수 있도록 요청/응답 DTO 예시를 아래처�
 }
 ```
 
+```ts
+export interface Pc3RoutineExercise {
+  exercise: string;
+  sets: number;
+  reps?: number | null;
+  duration_sec?: number | null;
+  rest_sec?: number | null;
+  focus: string;
+  reason: string;
+  how_to: string;
+  tips: string;
+}
+
+export interface Pc3WeeklyRoutineDay {
+  day_index: number;
+  day_label: string;
+  focus: string;
+  exercises: Pc3RoutineExercise[];
+}
+
+export interface Pc3RoutineCreateResponse {
+  summary: string;
+  weekly_focus: string;
+  weekly_routine: Pc3WeeklyRoutineDay[];
+  cautions: string[];
+  pc3_payload: {
+    routine_id: string;
+    start_date: string;
+    scheduled_dates: string[];
+    [key: string]: unknown;
+  };
+}
+```
+
 ### PC3 -> PC2 날짜별 루틴 조회 DTO
 
 ```http
 GET /api/routine/profile/user_001/day?target_date=2026-05-14
+```
+
+```ts
+export interface Pc3RoutineDayRequest {
+  user_id: string;
+  target_date: string;
+}
 ```
 
 ### PC2 -> PC3 날짜별 루틴 응답 DTO
@@ -107,6 +162,21 @@ GET /api/routine/profile/user_001/day?target_date=2026-05-14
   "summary": "운동 습관 형성을 위한 주간 루틴입니다.",
   "weekly_focus": "주 5회 리듬 유지와 전신 밸런스 확보",
   "message": "오늘은 상체 밀기와 코어 고정 루틴으로 pushup를 진행할 예정입니다."
+}
+```
+
+```ts
+export interface Pc3RoutineDayResponse {
+  routine_id: string;
+  user_id: string;
+  scheduled_date: string;
+  day_index: number;
+  day_label: string;
+  focus: string;
+  exercises: Pc3RoutineExercise[];
+  summary: string;
+  weekly_focus: string;
+  message: string;
 }
 ```
 
