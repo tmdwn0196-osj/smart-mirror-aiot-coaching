@@ -6,12 +6,20 @@ PC3 저장소 문서 스타일에 맞춰 저장소 기준 정보와 주요 변�
 ## 저장소 기준
 
 - 현재 브랜치: `main`
-- 현재 HEAD: `18997410e7f3665bf31197a3c4f4951b335ee434`
-- `origin/main`: `18997410e7f3665bf31197a3c4f4951b335ee434`
+- 현재 HEAD: `0cb6bcbb414f0460a63278669e2013961b98b91a`
+- `origin/main`: `0cb6bcbb414f0460a63278669e2013961b98b91a`
 - origin URL: `https://github.com/tmdwn0196-osj/smart-mirror-aiot-coaching.git`
 - 기준 명령: `git log --date=iso-strict --format="%h %ad %s"`
 
 ## 커밋 이력
+
+### 2026-05-14T17:20:39+09:00 `0cb6bcb`
+
+`fix(pc2): 프로필 루틴 응답 정규화`
+
+- 프로필 루틴 day 응답에서 `exercises`가 단일 객체로 와도 1개짜리 배열로 흡수하도록 정규화했습니다.
+- day detail 응답의 `day_index`가 요청값과 다를 때는 요청값으로 맞춰 저장되도록 정리했습니다.
+- 프로필 루틴이 계약을 조금 벗어나도 즉시 fallback으로 떨어지지 않게 검증을 완화했습니다.
 
 ### 2026-05-14T16:53:49+09:00 `1899741`
 
