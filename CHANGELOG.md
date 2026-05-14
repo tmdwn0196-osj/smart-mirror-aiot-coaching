@@ -13,6 +13,19 @@ PC3 저장소 문서 스타일에 맞춰 저장소 기준 정보와 주요 변�
 
 ## 커밋 이력
 
+### 미커밋 작업
+
+아직 커밋하지 않았지만 현재 워크트리에 반영된 주요 변경은 아래와 같습니다.
+
+- PC2 primary 모델 기본값을 NVIDIA hosted `mistralai/mistral-nemotron`으로 변경했습니다.
+- `PRIMARY_LLM_TIMEOUT_SECONDS`, `ROUTINE_PROFILE_TIMEOUT_SECONDS`, `REQUEST_DEADLINE_SECONDS`, `ROUTINE_DAY_DETAIL_TIMEOUT_SECONDS` 기본값을 상향해 primary LLM을 더 현실적으로 사용할 수 있게 조정했습니다.
+- `llm_client`에서 `reasoning_content`만 있고 최종 `content`가 없는 provider 응답을 즉시 예외 처리하도록 바꿨습니다.
+- `/api/routine/profile`은 primary 호출 실패나 파싱 실패 시 `503`으로 종료하지 않고 local rule fallback 루틴을 반환하도록 바뀌었습니다.
+- profile routine day 상세 확장은 전체 요청 deadline 안에서 남은 시간 기준으로 재시도하도록 조정했습니다.
+- 테스트 헬퍼가 `postgresql+psycopg://` DSN과 `psycopg.connect()`를 함께 처리하도록 보정했습니다.
+- PostgreSQL 연결 기준 전체 `unittest` 26개를 다시 실행해 통과를 확인했습니다.
+- no-LLM 모드로 `scripts/smoke_pc2.py`를 다시 실행해 baseline, generate, duplicate session, logs, `422` rejection까지 통과를 확인했습니다.
+
 ### 2026-05-13T12:20:28+09:00 `df12985`
 
 `docs: 변경 이력과 흐름 변경 문서에 과거 기록 반영`
@@ -130,4 +143,3 @@ PC3 저장소 문서 스타일에 맞춰 저장소 기준 정보와 주요 변�
 
 - PC2 Coach API 초기 저장소를 구성했습니다.
 - FastAPI 서버, DB 계층, LLM 호출 계층, 프롬프트 계층, 신호 해석 계층, 문서, 실행 스크립트, 테스트를 포함한 기본 구조를 추가했습니다.
-

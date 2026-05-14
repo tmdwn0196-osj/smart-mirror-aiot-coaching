@@ -91,18 +91,22 @@ def _build_user_prompt(prompt_payload: dict[str, Any], *, compact: bool) -> str:
             + json.dumps(slim_data, ensure_ascii=False, separators=(",", ":"))
         )
 
+    allowed_exercises = ", ".join(EXERCISE_TYPE_VALUES)
     return (
         "/no_think\n"
-        "아래 운동 feature와 baseline_profile, analysis_context만 사용한다. "
-        "latest_profile_routine가 있으면 해당 주간 루틴의 focus, cautions, day 구성과 충돌하지 않게 반영한다. "
-        "현재 상태를 우선하고, baseline보다 낮은 지표가 있으면 볼륨을 보수적으로 잡는다. "
-        "운동 계획은 2~4개 item으로 작성하고, item마다 exercise, sets, focus, reason은 필수다. "
-        "반복 운동이면 reps를, 정적 운동이면 duration_sec를 넣는다. 둘 다 필요 없으면 하나만 채운다. "
-        "priority는 가장 먼저 교정할 포인트 한 줄이다. "
-        "summary는 현재 상태와 계획 방향을 1문장으로 요약한다. "
-        "mirror_message는 한국어 짧은 문장이고 반드시 !로 끝낸다. "
-        "pc2_payload.message는 PC2 화면에 보낼 한 줄 메시지, display_lines는 2~3개 핵심 지시다. "
-        "warnings는 필요한 불확실성만 넣는다. "
+        "아래 입력만 사용해 정확히 하나의 JSON 객체만 반환한다. "
+        "top-level key는 summary, priority, exercise_plan, mirror_message, warnings, pc2_payload만 허용한다. "
+        "다른 key, 설명문, Markdown, 코드블록 금지. 마지막 문자는 반드시 }. "
+        f"exercise_plan.exercise는 반드시 {allowed_exercises} 중 하나만 사용한다. "
+        "exercise_plan은 1~3개 item만 작성한다. "
+        "각 item은 exercise, sets, reps, duration_sec, rest_sec, focus, reason, how_to, tips를 모두 포함한다. "
+        "반복 운동이면 reps 숫자, duration_sec null. 시간 운동이면 duration_sec 숫자, reps null. "
+        "summary와 priority는 1문장, mirror_message는 !로 끝나는 1문장, warnings는 문자열 배열, pc2_payload는 message와 display_lines만 포함한다. "
+        "pc2_payload.display_lines는 2~3개 문자열 배열이다. "
+        "빈 문자열이나 빈 내용으로 채우지 말고 모든 문장을 끝까지 완성한다. "
+        "latest_profile_routine와 충돌하지 않게 하고 baseline보다 낮은 지표가 있으면 보수적으로 작성한다. "
+        "예시: "
+        "{\"summary\":\"무릎 정렬 보완이 우선이다.\",\"priority\":\"무릎이 안쪽으로 무너지지 않게 교정\",\"exercise_plan\":[{\"exercise\":\"squat\",\"sets\":3,\"reps\":8,\"duration_sec\":null,\"rest_sec\":75,\"focus\":\"무릎-발끝 정렬 유지\",\"reason\":\"현재 자세 신호가 불안정해 볼륨을 보수적으로 조정한다.\",\"how_to\":\"내려갈 때 무릎 방향을 발끝과 맞춘다.\",\"tips\":\"반동 없이 천천히 하강한다.\"}],\"mirror_message\":\"무릎 정렬을 먼저 잡고 천천히 진행하세요!\",\"warnings\":[],\"pc2_payload\":{\"message\":\"무릎 정렬부터 잡고 3세트만 정확히 진행하세요.\",\"display_lines\":[\"무릎-발끝 정렬\",\"천천히 하강\",\"복부 고정\"]}} "
         + json.dumps(prompt_payload, ensure_ascii=False, separators=(",", ":"))
     )
 
@@ -135,7 +139,7 @@ def build_profile_routine_prompt(profile_payload: dict[str, Any]) -> tuple[str, 
         "절대로 pc3_payload, user_id, profile_name 같은 추가 key를 넣지 않는다. "
         "JSON은 반드시 완전히 닫힌 형태로 끝내고 마지막 문자도 } 이어야 한다. "
         "예시 구조: "
-        "{\"summary\":\"...\",\"weekly_focus\":\"...\",\"weekly_routine\":[{\"day_index\":1,\"day_label\":\"Day 1\",\"focus\":\"...\",\"exercises\":[{\"exercise\":\"...\",\"sets\":3,\"reps\":10,\"duration_sec\":null,\"rest_sec\":60,\"focus\":\"...\",\"reason\":\"...\",\"how_to\":\"...\",\"tips\":\"...\"}]}],\"cautions\":[\"...\"]} "
+        "{\"summary\":\"...\",\"weekly_focus\":\"...\",\"weekly_routine\":[{\"day_index\":1,\"day_label\":\"Day 1\",\"focus\":\"...\",\"exercises\":[{\"exercise\":\"squat\",\"sets\":3,\"reps\":10,\"duration_sec\":null,\"rest_sec\":60,\"focus\":\"...\",\"reason\":\"...\",\"how_to\":\"...\",\"tips\":\"...\"}]}],\"cautions\":[\"...\"]} "
         + json.dumps(profile_payload, ensure_ascii=False, separators=(",", ":"), default=str)
     )
     return PROFILE_ROUTINE_SYSTEM_PROMPT, user_prompt
@@ -168,7 +172,7 @@ def build_profile_routine_day_prompt(
         "tips는 호흡, 속도, 정렬 같은 핵심 요령을 20~50자 한 문장으로 쓴다. "
         "JSON은 반드시 완전히 닫힌 형태로 끝내고 마지막 문자도 } 이어야 한다. "
         "예시 구조: "
-        "{\"day_index\":1,\"day_label\":\"Day 1\",\"focus\":\"...\",\"exercises\":[{\"exercise\":\"...\",\"sets\":3,\"reps\":10,\"duration_sec\":null,\"rest_sec\":60,\"focus\":\"...\",\"reason\":\"...\",\"how_to\":\"...\",\"tips\":\"...\"}]} "
+        "{\"day_index\":1,\"day_label\":\"Day 1\",\"focus\":\"...\",\"exercises\":[{\"exercise\":\"squat\",\"sets\":3,\"reps\":10,\"duration_sec\":null,\"rest_sec\":60,\"focus\":\"...\",\"reason\":\"...\",\"how_to\":\"...\",\"tips\":\"...\"}]} "
         + json.dumps(prompt_payload, ensure_ascii=False, separators=(",", ":"), default=str)
     )
     return PROFILE_ROUTINE_SYSTEM_PROMPT, user_prompt

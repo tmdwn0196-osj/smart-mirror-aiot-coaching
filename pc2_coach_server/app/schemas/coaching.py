@@ -6,16 +6,26 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 EXERCISE_TYPE_VALUES = ("squat", "jumping_jack", "knee_raise", "lunge", "pushup")
 EXERCISE_TYPE_ALIASES = {
     "squat": "squat",
+    "스쿼트": "squat",
+    "tempo squat": "squat",
+    "box squat": "squat",
     "jumping_jack": "jumping_jack",
     "jumping jack": "jumping_jack",
     "jumping-jack": "jumping_jack",
+    "점핑잭": "jumping_jack",
     "knee_raise": "knee_raise",
     "knee raise": "knee_raise",
     "knee-raise": "knee_raise",
+    "knee raises": "knee_raise",
+    "니 레이즈": "knee_raise",
     "lunge": "lunge",
+    "런지": "lunge",
+    "reverse lunge": "lunge",
     "pushup": "pushup",
     "push-up": "pushup",
     "push up": "pushup",
+    "pushups": "pushup",
+    "푸시업": "pushup",
 }
 
 

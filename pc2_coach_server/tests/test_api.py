@@ -4,6 +4,7 @@ import sys
 import unittest
 from datetime import date
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -18,19 +19,26 @@ PROJECT_DIR = Path(__file__).resolve().parents[1]
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL", "").strip()
 
 
+def _psycopg_conninfo(url: str) -> str:
+    if url.startswith("postgresql+psycopg://"):
+        return "postgresql://" + url.removeprefix("postgresql+psycopg://")
+    return url
+
+
 def _schema_url(base_url: str, schema_name: str) -> str:
-    option = f"-csearch_path={schema_name}"
-    separator = "&" if "?" in base_url else "?"
-    return f"{base_url}{separator}options={option}"
+    parts = urlsplit(base_url)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query["options"] = f"-csearch_path={schema_name}"
+    return urlunsplit(parts._replace(query=urlencode(query)))
 
 
 def _create_schema(base_url: str, schema_name: str):
-    with psycopg.connect(base_url, autocommit=True) as conn:
+    with psycopg.connect(_psycopg_conninfo(base_url), autocommit=True) as conn:
         conn.execute(f'CREATE SCHEMA "{schema_name}"')
 
 
 def _drop_schema(base_url: str, schema_name: str):
-    with psycopg.connect(base_url, autocommit=True) as conn:
+    with psycopg.connect(_psycopg_conninfo(base_url), autocommit=True) as conn:
         conn.execute(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE')
 
 
@@ -396,7 +404,7 @@ class PC2ApiTests(unittest.TestCase):
         }
 
         with patch("app.services.is_primary_llm_configured", return_value=True), patch(
-            "app.services.call_primary_profile_routine_llm",
+            "app.services.call_primary_llm",
             side_effect=[weekly_llm_result, day1_llm_result, day2_llm_result],
         ) as mocked_call:
             response = self.main.generate_profile_routine(
@@ -446,6 +454,27 @@ class PC2ApiTests(unittest.TestCase):
         self.assertIn("천천히 앉았다가", parsed["weekly_routine"][0]["exercises"][0]["how_to"])
         self.assertIn("무릎 방향", parsed["weekly_routine"][0]["exercises"][0]["tips"])
         self.assertEqual(parsed["pc3_payload"]["weekly_routine"], parsed["weekly_routine"])
+
+    def test_parse_profile_routine_json_normalizes_exercise_aliases(self):
+        raw = (
+            '{"summary":"주간 루틴입니다.","weekly_focus":"기본 루틴 유지",'
+            '"weekly_routine":[{"day_index":1,"day_label":"Day 1","focus":"하체와 상체",'
+            '"exercises":['
+            '{"exercise":"스쿼트","sets":3,"reps":10,"rest_sec":60,"focus":"하체 안정성","reason":"기초 하체 자극입니다.","how_to":"천천히 앉았다가 올라옵니다.","tips":"무릎 정렬을 유지합니다."},'
+            '{"exercise":"push-up","sets":3,"reps":8,"rest_sec":60,"focus":"상체 안정성","reason":"상체 기초 자극입니다.","how_to":"몸을 일직선으로 유지하며 내려갔다가 올라옵니다.","tips":"복부 힘을 유지합니다."}'
+            ']}],'
+            '"cautions":[]}'
+        )
+        parsed = parse_profile_routine_json(
+            raw,
+            {
+                "cautions": [],
+                "available_days_per_week": 2,
+                "restricted_body_parts": [],
+            },
+        )
+        self.assertEqual(parsed["weekly_routine"][0]["exercises"][0]["exercise"], "squat")
+        self.assertEqual(parsed["weekly_routine"][0]["exercises"][1]["exercise"], "pushup")
 
     def test_parse_profile_routine_json_rejects_empty_routine_response(self):
         raw = '{"summary":"","weekly_focus":"","weekly_routine":[],"cautions":[]}'
@@ -514,7 +543,7 @@ class PC2ApiTests(unittest.TestCase):
         }
 
         with patch("app.services.is_primary_llm_configured", return_value=True), patch(
-            "app.services.call_primary_profile_routine_llm", return_value=routine_llm_result
+            "app.services.call_primary_llm", return_value=routine_llm_result
         ):
             self.main.generate_profile_routine(self.main.RoutineProfileRequest(**self._profile_payload()))
 
@@ -536,29 +565,26 @@ class PC2ApiTests(unittest.TestCase):
         )
 
     def test_generate_profile_routine_requires_primary_llm(self):
-        with self.assertRaises(HTTPException) as ctx:
-            self.main.generate_profile_routine(
-                self.main.RoutineProfileRequest(**self._profile_payload())
-            )
-        self.assertEqual(ctx.exception.status_code, 503)
-        self.assertEqual(ctx.exception.detail["reason"], "primary_llm_unconfigured")
+        response = self.main.generate_profile_routine(
+            self.main.RoutineProfileRequest(**self._profile_payload())
+        )
+        self.assertIn("weekly_routine", response)
+        self.assertIn("LLM 문제로 로컬 기본 루틴", response["cautions"][-1])
 
-    def test_generate_profile_routine_primary_failure_returns_503(self):
+    def test_generate_profile_routine_primary_failure_returns_local_fallback(self):
         with patch("app.services.is_primary_llm_configured", return_value=True), patch(
-            "app.services.call_primary_profile_routine_llm", side_effect=RuntimeError("forced failure")
+            "app.services.call_primary_llm", side_effect=RuntimeError("forced failure")
         ):
-            with self.assertRaises(HTTPException) as ctx:
-                self.main.generate_profile_routine(
-                    self.main.RoutineProfileRequest(
-                        **self._profile_payload(restricted_body_parts=["무릎", "어깨"])
-                    )
+            response = self.main.generate_profile_routine(
+                self.main.RoutineProfileRequest(
+                    **self._profile_payload(restricted_body_parts=["무릎", "어깨"])
                 )
+            )
+        self.assertTrue(response["summary"].startswith("LLM 응답 문제가 있어"))
+        self.assertIn("weekly_routine", response)
+        self.assertEqual(response["weekly_routine"][0]["exercises"][0]["exercise"], "pushup")
 
-        self.assertEqual(ctx.exception.status_code, 503)
-        self.assertEqual(ctx.exception.detail["message"], "루틴 생성에 실패했습니다.")
-        self.assertEqual(ctx.exception.detail["reason"], "primary_llm_call_failed")
-
-    def test_generate_profile_routine_parse_failure_returns_503(self):
+    def test_generate_profile_routine_parse_failure_returns_local_fallback(self):
         llm_result = {
             "content": "not-json",
             "served_by": "primary",
@@ -567,17 +593,15 @@ class PC2ApiTests(unittest.TestCase):
             "primary_error": None,
         }
         with patch("app.services.is_primary_llm_configured", return_value=True), patch(
-            "app.services.call_primary_profile_routine_llm", return_value=llm_result
+            "app.services.call_primary_llm", return_value=llm_result
         ):
-            with self.assertRaises(HTTPException) as ctx:
-                self.main.generate_profile_routine(
-                    self.main.RoutineProfileRequest(
-                        **self._profile_payload(restricted_body_parts=["무릎", "어깨"])
-                    )
+            response = self.main.generate_profile_routine(
+                self.main.RoutineProfileRequest(
+                    **self._profile_payload(restricted_body_parts=["무릎", "어깨"])
                 )
-
-        self.assertEqual(ctx.exception.status_code, 503)
-        self.assertEqual(ctx.exception.detail["reason"], "primary_llm_parse_failed")
+            )
+        self.assertTrue(response["summary"].startswith("LLM 응답 문제가 있어"))
+        self.assertEqual(response["pc3_payload"]["weekly_routine"][0]["exercises"][0]["exercise"], "pushup")
 
     def test_profile_routine_request_rejects_invalid_days(self):
         with self.assertRaises(ValidationError) as ctx:

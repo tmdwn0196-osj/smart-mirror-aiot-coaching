@@ -116,17 +116,30 @@ def _call_openai_compatible(
         http_client=http_client,
     )
     try:
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
         response = client.chat.completions.create(
             model=model_name,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
+            messages=messages,
             temperature=LLM_TEMPERATURE,
             max_tokens=max_tokens or LLM_MAX_TOKENS,
             response_format={"type": "json_object"} if expect_json else None,
         )
-        return response.choices[0].message.content or ""
+        message = response.choices[0].message
+        content = message.content or ""
+        if content.strip():
+            return content
+
+        reasoning_content = getattr(message, "reasoning_content", None) or ""
+        if expect_json and reasoning_content.strip():
+            raise RuntimeError(
+                f"{model_name} returned reasoning_content without final content; "
+                "structured JSON output is unavailable on this route."
+            )
+
+        return content
     finally:
         client.close()
 

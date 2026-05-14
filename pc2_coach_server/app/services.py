@@ -5,7 +5,14 @@ from uuid import uuid4
 
 from fastapi import HTTPException
 
-from app.config import FALLBACK_LLM_ENABLED
+from app.config import (
+    FALLBACK_LLM_ENABLED,
+    PRIMARY_LLM_TIMEOUT_SECONDS,
+    REQUEST_DEADLINE_SECONDS,
+    ROUTINE_DAY_DETAIL_TIMEOUT_SECONDS,
+    ROUTINE_PROFILE_MAX_TOKENS,
+    ROUTINE_PROFILE_TIMEOUT_SECONDS,
+)
 from app.db import (
     find_existing_session_log,
     get_latest_baseline,
@@ -78,6 +85,11 @@ def _resolve_routine_start_date(payload: RoutineProfileRequest) -> date:
     return payload.start_date or date.today()
 
 
+def _remaining_seconds(deadline_started_at: float, limit_seconds: float, reserve_seconds: float = 0.5) -> float:
+    elapsed = perf_counter() - deadline_started_at
+    return max(0.0, limit_seconds - elapsed - reserve_seconds)
+
+
 def _build_routine_day_message(day: dict) -> str:
     exercise_names = [str(item.get("exercise") or "").strip() for item in day.get("exercises") or [] if item.get("exercise")]
     if not exercise_names:
@@ -91,6 +103,7 @@ def _expand_profile_routine_days(
     routine_response: dict,
     logger,
     request_id: str,
+    started_at: float,
 ) -> list[dict]:
     profile_payload = dump_model(payload)
     weekly_outline = {
@@ -103,14 +116,35 @@ def _expand_profile_routine_days(
 
     expanded_days: list[dict] = []
     for day in routine_response.get("weekly_routine") or []:
+        remaining = _remaining_seconds(started_at, REQUEST_DEADLINE_SECONDS)
+        if remaining <= 0.75:
+            expanded_days.append(day)
+            continue
         system_prompt, user_prompt = build_profile_routine_day_prompt(
             profile_payload,
             weekly_outline,
             day,
         )
         try:
-            llm_result = call_primary_profile_routine_llm(system_prompt, user_prompt)
-            expanded_day = parse_profile_routine_day_json(llm_result["content"], day["day_index"], day)
+            llm_result = call_primary_llm(
+                system_prompt,
+                user_prompt,
+                max_tokens=ROUTINE_PROFILE_MAX_TOKENS,
+                timeout_seconds=min(ROUTINE_DAY_DETAIL_TIMEOUT_SECONDS, remaining),
+            )
+            try:
+                expanded_day = parse_profile_routine_day_json(llm_result["content"], day["day_index"], day)
+            except Exception:
+                retry_remaining = _remaining_seconds(started_at, REQUEST_DEADLINE_SECONDS)
+                if retry_remaining <= 0.75:
+                    raise
+                retry_result = call_primary_llm(
+                    system_prompt,
+                    user_prompt,
+                    max_tokens=ROUTINE_PROFILE_MAX_TOKENS,
+                    timeout_seconds=min(ROUTINE_DAY_DETAIL_TIMEOUT_SECONDS, retry_remaining),
+                )
+                expanded_day = parse_profile_routine_day_json(retry_result["content"], day["day_index"], day)
             expanded_days.append(expanded_day)
         except Exception as exc:
             logger.warning(
@@ -122,6 +156,117 @@ def _expand_profile_routine_days(
             )
             expanded_days.append(day)
     return expanded_days
+
+
+def _pick_fallback_routine_exercises(restricted_body_parts: list[str]) -> list[str]:
+    restricted = {str(part or "").strip() for part in restricted_body_parts if str(part or "").strip()}
+    if "무릎" in restricted:
+        return ["pushup", "knee_raise"]
+    if "어깨" in restricted:
+        return ["squat", "knee_raise", "lunge"]
+    if "허리" in restricted:
+        return ["jumping_jack", "pushup", "knee_raise"]
+    return ["squat", "pushup", "jumping_jack", "knee_raise", "lunge"]
+
+
+def build_local_routine_response(payload: RoutineProfileRequest, fallback_reason: str) -> dict:
+    start_date = _resolve_routine_start_date(payload)
+    exercise_pool = _pick_fallback_routine_exercises(payload.restricted_body_parts)
+    day_count = max(1, min(payload.available_days_per_week, len(exercise_pool)))
+    weekly_routine: list[dict] = []
+    for index in range(day_count):
+        exercise_name = exercise_pool[index % len(exercise_pool)]
+        if exercise_name == "jumping_jack":
+            item = {
+                "exercise": "jumping_jack",
+                "sets": 3,
+                "reps": None,
+                "duration_sec": 30,
+                "rest_sec": 45,
+                "focus": "가벼운 전신 순환",
+                "reason": "짧은 시간 안에 전신 움직임을 확보하기 좋습니다.",
+                "how_to": "양팔과 다리를 동시에 벌렸다가 다시 모으며 일정한 속도로 반복합니다.",
+                "tips": "착지 충격을 줄이기 위해 가볍게 발을 디디세요.",
+            }
+            focus = "전신 순환과 리듬 회복"
+        elif exercise_name == "pushup":
+            item = {
+                "exercise": "pushup",
+                "sets": 3,
+                "reps": 8,
+                "duration_sec": None,
+                "rest_sec": 60,
+                "focus": "상체 기초 근력",
+                "reason": "상체를 무리 없이 자극하며 운동 루틴을 유지하기 좋습니다.",
+                "how_to": "손을 어깨너비로 두고 몸통을 일직선으로 유지하며 내려갔다가 밀어 올립니다.",
+                "tips": "힘들면 무릎을 바닥에 대고 강도를 낮추세요.",
+            }
+            focus = "상체 안정성과 코어 고정"
+        elif exercise_name == "knee_raise":
+            item = {
+                "exercise": "knee_raise",
+                "sets": 3,
+                "reps": 12,
+                "duration_sec": None,
+                "rest_sec": 45,
+                "focus": "코어와 고관절 제어",
+                "reason": "충격이 적어 제한 부위가 있을 때도 비교적 안전하게 수행할 수 있습니다.",
+                "how_to": "서서 한쪽 무릎을 가슴 쪽으로 천천히 들어 올렸다가 반대쪽도 반복합니다.",
+                "tips": "허리가 젖혀지지 않게 복부에 힘을 주세요.",
+            }
+            focus = "코어와 하체 제어 회복"
+        elif exercise_name == "lunge":
+            item = {
+                "exercise": "lunge",
+                "sets": 3,
+                "reps": 8,
+                "duration_sec": None,
+                "rest_sec": 60,
+                "focus": "하체 균형과 둔근 활성화",
+                "reason": "좌우 균형을 잡으며 하체 근력을 회복하기 좋습니다.",
+                "how_to": "한발을 뒤로 보내며 천천히 내려갔다가 앞발로 밀어 올라옵니다.",
+                "tips": "상체를 세우고 앞무릎이 안쪽으로 무너지지 않게 하세요.",
+            }
+            focus = "하체 균형과 안정성 강화"
+        else:
+            item = {
+                "exercise": "squat",
+                "sets": 3,
+                "reps": 10,
+                "duration_sec": None,
+                "rest_sec": 60,
+                "focus": "하체 기초 근력",
+                "reason": "기본 하체 힘과 자세 습관을 만드는 데 적합합니다.",
+                "how_to": "발을 어깨너비로 두고 엉덩이를 뒤로 빼며 천천히 앉았다가 올라옵니다.",
+                "tips": "무릎 방향을 발끝과 맞추고 일어날 때 숨을 내쉬세요.",
+            }
+            focus = "하체와 코어 안정화"
+        weekly_routine.append(
+            {
+                "day_index": index + 1,
+                "day_label": f"Day {index + 1}",
+                "focus": focus,
+                "exercises": [item],
+            }
+        )
+
+    return {
+        "summary": "LLM 응답 문제가 있어 로컬 규칙 기반 주간 루틴을 생성했습니다.",
+        "weekly_focus": "짧고 안전한 기본 동작으로 운동 리듬을 유지합니다.",
+        "weekly_routine": weekly_routine,
+        "cautions": [
+            *_restriction_cautions(payload.restricted_body_parts),
+            f"LLM 문제로 로컬 기본 루틴을 사용했습니다. ({fallback_reason})",
+        ][:3],
+        "pc3_payload": {
+            "summary": "LLM 응답 문제가 있어 로컬 규칙 기반 주간 루틴을 생성했습니다.",
+            "weekly_focus": "짧고 안전한 기본 동작으로 운동 리듬을 유지합니다.",
+            "available_days_per_week": payload.available_days_per_week,
+            "restricted_body_parts": payload.restricted_body_parts,
+            "weekly_routine": weekly_routine,
+            "start_date": start_date.isoformat(),
+        },
+    }
 
 
 def build_local_plan_response(
@@ -406,47 +551,32 @@ def generate_coaching_response(payload: FeaturePayload, logger) -> dict:
                 try:
                     final_response = parse_coaching_json(raw_llm, base_response)
                 except Exception as exc:
-                    if llm_result["served_by"] == "primary" and FALLBACK_LLM_ENABLED:
-                        fallback_started_at = perf_counter()
-                        try:
-                            llm_result = call_fallback_llm(
-                                fallback_system_prompt,
-                                fallback_user_prompt,
-                                primary_error=f"parse_failed: {exc}",
+                    retry_remaining = _remaining_seconds(started_at, REQUEST_DEADLINE_SECONDS)
+                    try:
+                        if llm_result["served_by"] == "primary" and retry_remaining > 0.75:
+                            retry_started_at = perf_counter()
+                            retry_result = call_primary_llm(
+                                system_prompt,
+                                user_prompt,
+                                timeout_seconds=min(PRIMARY_LLM_TIMEOUT_SECONDS, retry_remaining),
                             )
-                            raw_llm = llm_result["content"]
-                            llm_ms = int((perf_counter() - fallback_started_at) * 1000)
-                            final_response = build_fallback_message_response(raw_llm, warnings)
-                        except Exception as fallback_exc:
-                            logger.warning(
-                                "coach_request_local_fallback request_id=%s user_id=%s mode=%s reason=fallback_parse_failed error=%s",
-                                request_id,
-                                payload.user_id,
-                                payload.mode,
-                                fallback_exc,
-                            )
-                            llm_ms = 0
-                            raw_llm = ""
-                            llm_result = local_llm_result(f"fallback_parse_failed: {fallback_exc}")
-                            final_response = build_local_plan_response(
-                                enriched_payload,
-                                baseline_profile,
-                                signal_data,
-                                context_data,
-                                warnings,
-                                "fallback parse failed",
-                            )
-                    else:
+                            raw_llm = retry_result["content"]
+                            llm_ms += int((perf_counter() - retry_started_at) * 1000)
+                            llm_result = retry_result
+                            final_response = parse_coaching_json(raw_llm, base_response)
+                        else:
+                            raise exc
+                    except Exception as retry_exc:
                         logger.warning(
                             "coach_request_local_fallback request_id=%s user_id=%s mode=%s reason=llm_parse_failed error=%s",
                             request_id,
                             payload.user_id,
                             payload.mode,
-                            exc,
+                            retry_exc,
                         )
                         llm_ms = 0
                         raw_llm = ""
-                        llm_result = local_llm_result(f"llm_parse_failed: {exc}")
+                        llm_result = local_llm_result(f"llm_parse_failed: {retry_exc}")
                         final_response = build_local_plan_response(
                             enriched_payload, baseline_profile, signal_data, context_data, warnings, "llm parse failed"
                         )
@@ -506,6 +636,7 @@ def generate_coaching_response(payload: FeaturePayload, logger) -> dict:
 
 
 def generate_profile_routine_response(payload: RoutineProfileRequest, logger) -> dict:
+    started_at = perf_counter()
     request_id = f"profile_{uuid4().hex[:12]}"
     logger.info(
         "profile_routine_request_start request_id=%s user_id=%s days=%s",
@@ -528,54 +659,48 @@ def generate_profile_routine_response(payload: RoutineProfileRequest, logger) ->
 
     if not is_primary_llm_configured():
         logger.warning(
-            "profile_routine_request_failed request_id=%s user_id=%s reason=primary_llm_unconfigured",
+            "profile_routine_request_local_fallback request_id=%s user_id=%s reason=primary_llm_unconfigured",
             request_id,
             payload.user_id,
         )
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "message": "루틴 생성에 실패했습니다.",
-                "reason": "primary_llm_unconfigured",
-            },
-        )
+        final_response = build_local_routine_response(payload, "primary llm unconfigured")
+        llm_result = local_llm_result("primary_llm_unconfigured")
+    else:
+        try:
+            llm_result = call_primary_llm(
+                system_prompt,
+                user_prompt,
+                max_tokens=ROUTINE_PROFILE_MAX_TOKENS,
+                timeout_seconds=min(ROUTINE_PROFILE_TIMEOUT_SECONDS, REQUEST_DEADLINE_SECONDS - 4.0),
+            )
+            raw_llm = llm_result["content"]
+            try:
+                final_response = parse_profile_routine_json(raw_llm, base_response)
+            except Exception:
+                retry_remaining = _remaining_seconds(started_at, REQUEST_DEADLINE_SECONDS, reserve_seconds=3.0)
+                if retry_remaining > 0.75:
+                    retry_result = call_primary_llm(
+                        system_prompt,
+                        user_prompt,
+                        max_tokens=ROUTINE_PROFILE_MAX_TOKENS,
+                        timeout_seconds=min(ROUTINE_PROFILE_TIMEOUT_SECONDS, retry_remaining),
+                    )
+                    llm_result = retry_result
+                    raw_llm = retry_result["content"]
+                    final_response = parse_profile_routine_json(raw_llm, base_response)
+                else:
+                    raise
+        except Exception as exc:
+            logger.warning(
+                "profile_routine_request_local_fallback request_id=%s user_id=%s reason=primary_llm_failed error=%s",
+                request_id,
+                payload.user_id,
+                exc,
+            )
+            final_response = build_local_routine_response(payload, "primary llm failed")
+            llm_result = local_llm_result(f"primary_llm_failed: {exc}")
 
-    try:
-        llm_result = call_primary_profile_routine_llm(system_prompt, user_prompt)
-        raw_llm = llm_result["content"]
-    except Exception as exc:
-        logger.warning(
-            "profile_routine_request_failed request_id=%s user_id=%s reason=primary_llm_call_failed error=%s",
-            request_id,
-            payload.user_id,
-            exc,
-        )
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "message": "루틴 생성에 실패했습니다.",
-                "reason": "primary_llm_call_failed",
-            },
-        ) from exc
-
-    try:
-        final_response = parse_profile_routine_json(raw_llm, base_response)
-    except Exception as exc:
-        logger.warning(
-            "profile_routine_request_failed request_id=%s user_id=%s reason=primary_llm_parse_failed error=%s",
-            request_id,
-            payload.user_id,
-            exc,
-        )
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "message": "루틴 생성에 실패했습니다.",
-                "reason": "primary_llm_parse_failed",
-            },
-        ) from exc
-
-    detailed_days = _expand_profile_routine_days(payload, final_response, logger, request_id)
+    detailed_days = _expand_profile_routine_days(payload, final_response, logger, request_id, started_at)
     final_response["weekly_routine"] = detailed_days
     final_response["pc3_payload"] = {
         **(final_response.get("pc3_payload") or {}),

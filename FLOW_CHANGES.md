@@ -196,6 +196,8 @@ PostgreSQL Docker
         -> PC1
 ```
 
+현재 primary 기본 모델은 NVIDIA hosted `mistralai/mistral-nemotron`입니다.
+
 ### 세부 규칙
 
 - `/api/coach/generate`
@@ -204,8 +206,21 @@ PostgreSQL Docker
   - 즉 이 경로는 LLM이 불안정해도 응답을 유지하는 방향입니다.
 
 - `/api/routine/profile`
-  - primary LLM 전용입니다.
-  - 설정 누락, 호출 실패, 파싱 실패 시 local fallback 없이 `503`을 반환합니다.
+  - primary LLM을 먼저 사용합니다.
+  - 주간 루틴 본문 생성이 실패하면 local rule fallback으로 전체 weekly routine을 생성합니다.
+  - day 상세 확장은 전체 요청 deadline 안에서 남은 시간을 계산해 추가 시도하고, 실패한 day는 기존 outline을 유지합니다.
+  - 즉 이 경로도 이제는 provider 장애나 파싱 실패가 있어도 가능한 한 응답을 유지하는 방향으로 바뀌었습니다.
+
+- timeout 흐름
+  - `/api/coach/generate`의 primary 호출은 `PRIMARY_LLM_TIMEOUT_SECONDS`를 기준으로 동작합니다.
+  - `/api/routine/profile`의 주간 루틴 생성은 `ROUTINE_PROFILE_TIMEOUT_SECONDS`와 전체 `REQUEST_DEADLINE_SECONDS` 안에서 동작합니다.
+  - day 상세 생성은 각 day마다 `ROUTINE_DAY_DETAIL_TIMEOUT_SECONDS`와 남은 전체 deadline 중 더 작은 값을 사용합니다.
+  - health 확인은 `LLM_HEALTH_TIMEOUT_SECONDS` 기준으로 `/models`를 조회합니다.
+
+- provider 장애 처리
+  - provider `/models` health가 `ok`여도 실제 inference 함수가 `DEGRADED` 상태면 generate 호출이 실패할 수 있습니다.
+  - 현재 코드는 이 경우 local fallback으로 내려가도록 되어 있어 API 레벨에서는 `200` 응답을 유지할 수 있습니다.
+  - `reasoning_content`만 있고 최종 `content`가 없는 응답은 structured JSON 경로에서 즉시 실패로 판정합니다.
 
 - `restricted_body_parts`
   - 루틴 생성 시 해당 부위 부담이 큰 동작을 피하거나 강도를 낮추는 기준으로 사용합니다.
@@ -223,4 +238,3 @@ PostgreSQL Docker
 PC3 분석 결과는 /api/coach/generate 로 들어와 코칭 응답과 로그 저장으로 이어지고,
 PC1 프로필은 PC3를 거쳐 /api/routine/profile 로 들어와 주간 루틴 생성과 날짜별 루틴 저장/조회 흐름으로 이어집니다.
 ```
-
