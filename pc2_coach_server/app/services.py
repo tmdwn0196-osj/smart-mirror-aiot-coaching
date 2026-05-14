@@ -550,7 +550,10 @@ def generate_coaching_response(payload: FeaturePayload, logger) -> dict:
             )
         else:
             if llm_result["served_by"] == "fallback":
-                final_response = build_fallback_message_response(raw_llm, warnings)
+                try:
+                    final_response = parse_coaching_json(raw_llm, base_response)
+                except Exception:
+                    final_response = build_fallback_message_response(raw_llm, warnings)
             else:
                 try:
                     final_response = parse_coaching_json(raw_llm, base_response)

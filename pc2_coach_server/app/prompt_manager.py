@@ -6,16 +6,26 @@ from app.schemas import EXERCISE_TYPE_VALUES
 
 SYSTEM_PROMPT = (
     "스마트미러 운동 계획 API다.\n"
-    "입력은 PC3 feature, baseline, 검색 지식만 사용한다.\n"
-    "latest_profile_routine가 있으면 방향 충돌을 피한다.\n"
-    "안전한 범위에서 CoachingResponse JSON만 출력한다.\n"
-    "진단/추측/Markdown/설명문은 금지한다.\n"
-    "운동명, 세트 수, 반복 수 또는 시간을 반드시 포함한다."
+    "출력은 반드시 CoachingResponse JSON 1개만 허용한다.\n"
+    "아래 스키마와 정확히 일치해야 한다.\n"
+    "{\"summary\":\"문자열\",\"priority\":\"문자열\",\"exercise_plan\":[{\"exercise\":\"squat|jumping_jack|knee_raise|lunge|pushup\",\"sets\":1,\"reps\":1,\"duration_sec\":null,\"rest_sec\":60,\"focus\":\"문자열\",\"reason\":\"문자열\",\"how_to\":\"문자열\",\"tips\":\"문자열\"}],\"mirror_message\":\"문자열\",\"warnings\":[\"문자열\"],\"pc2_payload\":{\"message\":\"문자열\",\"display_lines\":[\"문자열\"]}}\n"
+    "규칙:\n"
+    "- top-level key는 summary, priority, exercise_plan, mirror_message, warnings, pc2_payload만 허용한다.\n"
+    "- 추가 key, 설명문, 코드블록, Markdown, 주석, 앞뒤 문장은 금지한다.\n"
+    "- exercise_plan은 1~2개 item만 작성한다.\n"
+    "- 각 item은 exercise, sets, focus, reason을 반드시 포함한다.\n"
+    "- reps 또는 duration_sec 중 최소 1개는 반드시 넣는다.\n"
+    "- rest_sec는 가능하면 넣고, 비워둘 때만 null로 둔다.\n"
+    "- pc2_payload.message는 한 줄 요약이어야 하고 display_lines는 1~3개 문자열 배열이어야 한다.\n"
+    "- latest_profile_routine가 있으면 방향 충돌을 피한다.\n"
+    "- 안전한 범위에서만 답하고, JSON 외 출력은 모두 실패로 간주된다."
 )
 
 COMPACT_SYSTEM_PROMPT = (
-    "PC3용 짧은 한국어 한 문장만 출력한다.\n"
-    "JSON, 코드블록, key 이름, 설명문은 금지한다."
+    "PC3 코칭 응답을 JSON 1개로만 출력한다.\n"
+    "summary, priority, exercise_plan, mirror_message, warnings, pc2_payload 외 key는 금지다.\n"
+    "설명문, 코드블록, Markdown, 앞뒤 문장은 금지다.\n"
+    "형식이 흔들리면 실패로 간주되므로 JSON 스키마를 반드시 지켜라."
 )
 
 PROFILE_ROUTINE_SYSTEM_PROMPT = (
@@ -78,7 +88,12 @@ def _build_user_prompt(prompt_payload: dict[str, Any], *, compact: bool) -> str:
         slim_data = _compact_payload(prompt_payload)
         return (
             "/no_think\n"
-            "짧은 한국어 한 문장만 출력. JSON/코드블록/설명문 금지. "
+            "아래 JSON 스키마를 정확히 지켜 단일 객체만 출력한다. "
+            "top-level key는 summary, priority, exercise_plan, mirror_message, warnings, pc2_payload만 허용한다. "
+            "exercise_plan은 1~2개 item만 허용하고, 각 item은 exercise, sets, focus, reason을 반드시 포함한다. "
+            "reps 또는 duration_sec 중 최소 1개는 반드시 넣는다. "
+            "pc2_payload는 message와 display_lines만 포함하고 display_lines는 1~3개 문자열 배열이다. "
+            "추가 key, 설명문, Markdown, 코드블록은 금지다. "
             + json.dumps(slim_data, ensure_ascii=False, separators=(",", ":"))
         )
 
@@ -89,11 +104,14 @@ def _build_user_prompt(prompt_payload: dict[str, Any], *, compact: bool) -> str:
         "top-level key는 summary, priority, exercise_plan, mirror_message, warnings, pc2_payload만 허용한다. "
         f"exercise_plan.exercise는 반드시 {allowed_exercises} 중 하나만 사용한다. "
         "exercise_plan은 1~2개 item만 작성한다. "
-        "각 item은 exercise, sets, reps, duration_sec, rest_sec, focus, reason, how_to, tips를 포함한다. "
-        "반복 운동이면 reps 숫자, duration 운동이면 duration_sec 숫자만 넣는다. "
-        "summary와 priority는 1문장, mirror_message는 1문장, warnings는 문자열 배열이다. "
-        "pc2_payload는 message와 display_lines만 포함하고 display_lines는 2개 문자열 배열이다. "
+        "각 item은 exercise, sets, focus, reason을 반드시 포함한다. "
+        "reps 또는 duration_sec 중 최소 1개는 반드시 넣고, 두 값이 모두 있는 경우에는 운동 유형에 맞게 하나를 우선한다. "
+        "how_to와 tips는 짧게 유지하되 비워두지 않는다. "
+        "summary와 priority는 각각 1문장만 허용하고, mirror_message도 1문장만 허용한다. "
+        "warnings는 문자열 배열이며, 비어 있으면 []로 둔다. "
+        "pc2_payload는 message와 display_lines만 포함하고 display_lines는 1~3개 문자열 배열이다. "
         "latest_profile_routine와 충돌하지 않게 하고 baseline보다 낮은 지표는 보수적으로 반영한다. "
+        "추가 key, 설명문, Markdown, 코드블록, 앞뒤 문장은 모두 금지한다. "
         + json.dumps(prompt_payload, ensure_ascii=False, separators=(",", ":"))
     )
 
