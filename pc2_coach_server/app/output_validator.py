@@ -46,6 +46,15 @@ def _extract_json_object(text: str) -> dict[str, Any] | None:
 def _normalize_plan(plan: Any) -> list[dict[str, Any]]:
     if plan is None:
         return []
+    if isinstance(plan, dict):
+        if isinstance(plan.get("exercise_plan"), list):
+            plan = plan.get("exercise_plan")
+        elif isinstance(plan.get("exercises"), list):
+            plan = plan.get("exercises")
+        elif isinstance(plan.get("exercise"), str) or any(plan.get(key) is not None for key in ("sets", "reps", "duration_sec", "rest_sec", "focus", "reason", "how_to", "tips")):
+            plan = [plan]
+        else:
+            raise ValueError("exercise_plan은 배열이어야 합니다.")
     if not isinstance(plan, list):
         raise ValueError("exercise_plan은 배열이어야 합니다.")
 
@@ -290,11 +299,13 @@ def parse_profile_routine_day_json(raw_text: str, day_index: int, fallback_day: 
 
     normalized = _normalize_routine_day(parsed)
     if normalized["day_index"] != day_index:
-        raise ValueError("루틴 day 응답의 day_index가 요청값과 일치하지 않습니다.")
+        normalized["day_index"] = day_index
     if not normalized["day_label"]:
-        raise ValueError("루틴 day 응답에는 day_label이 필요합니다.")
+        normalized["day_label"] = str(fallback_day.get("day_label") or f"Day {day_index}")
     if not normalized["focus"]:
-        raise ValueError("루틴 day 응답에는 focus가 필요합니다.")
+        normalized["focus"] = str(fallback_day.get("focus") or "")
+    if not normalized["exercises"]:
+        normalized["exercises"] = _normalize_routine_plan(fallback_day.get("exercises"))
     if not normalized["exercises"]:
         raise ValueError("루틴 day 응답에는 최소 1개 이상의 exercise가 필요합니다.")
     return {

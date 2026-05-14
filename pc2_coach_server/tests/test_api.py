@@ -12,7 +12,7 @@ import psycopg
 
 from fastapi import HTTPException
 from pydantic import ValidationError
-from app.output_validator import parse_coaching_json, parse_profile_routine_json
+from app.output_validator import parse_coaching_json, parse_profile_routine_day_json, parse_profile_routine_json
 
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
@@ -475,6 +475,32 @@ class PC2ApiTests(unittest.TestCase):
         )
         self.assertEqual(parsed["weekly_routine"][0]["exercises"][0]["exercise"], "squat")
         self.assertEqual(parsed["weekly_routine"][0]["exercises"][1]["exercise"], "pushup")
+
+    def test_parse_profile_routine_day_json_accepts_single_object_and_day_index_mismatch(self):
+        parsed = parse_profile_routine_day_json(
+            '{"day_index":2,"day_label":"Day 2","focus":"코어 안정화","exercises":{"exercise":"pushup","sets":3,"reps":8,"rest_sec":60,"focus":"상체 기초","reason":"상체를 유지합니다.","how_to":"천천히 내렸다가 밀어 올립니다.","tips":"복부 힘을 유지하세요."}}',
+            1,
+            {
+                "day_index": 1,
+                "day_label": "Day 1",
+                "focus": "상체 안정성과 코어 고정",
+                "exercises": [
+                    {
+                        "exercise": "pushup",
+                        "sets": 3,
+                        "reps": 8,
+                        "rest_sec": 60,
+                        "focus": "상체 기초",
+                        "reason": "상체를 유지합니다.",
+                        "how_to": "천천히 내렸다가 밀어 올립니다.",
+                        "tips": "복부 힘을 유지하세요.",
+                    }
+                ],
+            },
+        )
+        self.assertEqual(parsed["day_index"], 1)
+        self.assertEqual(parsed["day_label"], "Day 2")
+        self.assertEqual(parsed["exercises"][0]["exercise"], "pushup")
 
     def test_parse_profile_routine_json_rejects_empty_routine_response(self):
         raw = '{"summary":"","weekly_focus":"","weekly_routine":[],"cautions":[]}'
