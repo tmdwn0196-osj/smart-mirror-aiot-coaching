@@ -411,7 +411,7 @@ class PC2ApiTests(unittest.TestCase):
                 self.main.RoutineProfileRequest(**self._profile_payload(start_date="2026-05-13"))
             )
 
-        self.assertEqual(mocked_call.call_count, 3)
+        self.assertEqual(mocked_call.call_count, 2)
         self.assertEqual(response["weekly_focus"], "주 5회 리듬 유지와 전신 밸런스 확보")
         self.assertEqual(response["weekly_routine"][0]["exercises"][0]["exercise"], "squat")
         self.assertEqual(response["weekly_routine"][0]["focus"], "하체와 코어 안정화")

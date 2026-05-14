@@ -230,6 +230,25 @@ PostgreSQL Docker
   - 루틴 Day 1 시작 날짜 기준입니다.
   - 없으면 서버 기준 오늘 날짜를 사용합니다.
 
+## 최근 최적화
+
+이번 변경에서는 응답 계약 자체보다 prompt와 반복 호출량을 줄이는 쪽으로 흐름을 다듬었습니다.
+
+- `coach/generate`
+  - 입력 분석에 필요한 핵심 변수는 유지했습니다.
+  - prompt 예시와 중복 설명을 줄여 토큰 수를 낮췄습니다.
+  - `features.exercise`, `baseline_diff`, `analysis_context` 중심 구조는 그대로 유지합니다.
+
+- `routine/profile`
+  - 주간 루틴 본문 생성은 그대로 유지합니다.
+  - day-detail 확장은 첫 1일까지만 수행해 추가 LLM 호출 수를 줄였습니다.
+  - 응답이 실패하더라도 local fallback JSON을 유지하는 정책은 그대로 둡니다.
+
+- signal 압축
+  - prompt로 넘기기 전에 signal summary를 더 짧게 압축합니다.
+  - baseline, latest routine, signal preview는 유지하되 길이만 줄였습니다.
+  - 의미를 바꾸는 변수명은 그대로 두고, 설명성 텍스트만 압축했습니다.
+
 ## 현재 기준 요약
 
 현재 저장소의 흐름을 한 줄로 정리하면 아래와 같습니다.

@@ -174,15 +174,40 @@ def compact_for_prompt(
     analysis_context: list[dict[str, Any]] | None = None,
     latest_profile_routine: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    feature_json = {
-        "features": _dump_model(payload.features),
-        "baseline_diff": _dump_model(payload.baseline_diff),
+    exercise = payload.features.exercise
+    baseline_diff = payload.baseline_diff.exercise
+    feature_json: dict[str, Any] = {
+        "exercise": {
+            "type": getattr(exercise, "type", None),
+            "rep_count": getattr(exercise, "rep_count", None) if getattr(exercise, "rep_count", None) is not None else getattr(exercise, "count", None),
+            "stability_score": getattr(exercise, "stability_score", None),
+            "posture_errors": (getattr(exercise, "posture_errors", None) or [])[:1],
+            "squat_depth": getattr(exercise, "squat_depth", None),
+            "knee_angle": getattr(exercise, "knee_angle", None),
+            "back_angle": getattr(exercise, "back_angle", None),
+            "duration_sec": getattr(exercise, "duration_sec", None)
+            if getattr(exercise, "duration_sec", None) is not None
+            else getattr(exercise, "duration_seconds", None),
+            "tempo": getattr(exercise, "tempo", None),
+        }
     }
+    if baseline_diff is not None:
+        feature_json["baseline_diff"] = {
+            "count_change": baseline_diff.count_change,
+            "stability_change": baseline_diff.stability_change,
+            "knee_angle_change": baseline_diff.knee_angle_change,
+            "squat_depth_change": baseline_diff.squat_depth_change,
+            "duration_change": baseline_diff.duration_change,
+        }
     if payload.environment is not None:
-        feature_json["environment"] = _dump_model(payload.environment)
+        feature_json["environment"] = {
+            "temperature": payload.environment.temperature,
+            "humidity": payload.environment.humidity,
+            "illuminance": payload.environment.illuminance,
+        }
 
     signal_data = []
-    for signal in signals[:8]:
+    for signal in signals[:4]:
         signal_data.append(
             {
                 "category": signal.category,
@@ -192,15 +217,53 @@ def compact_for_prompt(
             }
         )
 
+    routine_snapshot = latest_profile_routine or {}
+    routine_response = routine_snapshot.get("routine_response") if isinstance(routine_snapshot, dict) else None
+    routine_response = routine_response if isinstance(routine_response, dict) else routine_snapshot if isinstance(routine_snapshot, dict) else {}
+
     return {
         "mode": payload.mode,
         "event": payload.event,
         "purpose": payload.purpose,
         "feature_summary": query_text or build_query_text(payload, baseline=baseline),
         "feature_json": feature_json,
-        "baseline_profile": _dump_model(baseline) if baseline is not None else None,
-        "latest_profile_routine": latest_profile_routine,
-        "analysis_context": analysis_context or [],
+        "baseline_profile": {
+            "exercise_type": baseline.exercise_type,
+            "recommended_sets": baseline.recommended_sets,
+            "recommended_reps": baseline.recommended_reps,
+            "stability_score_avg": baseline.stability_score_avg,
+            "frequent_posture_errors": baseline.frequent_posture_errors[:2],
+        }
+        if baseline is not None
+        else None,
+        "latest_profile_routine": (
+            {
+                "summary": routine_response.get("summary"),
+                "weekly_focus": routine_response.get("weekly_focus"),
+                "scheduled_dates": routine_snapshot.get("scheduled_dates", [])[:2],
+                "weekly_routine_preview": [
+                    {
+                        "day_index": day.get("day_index"),
+                        "focus": day.get("focus"),
+                        "exercise": (day.get("exercises") or [{}])[0].get("exercise"),
+                    }
+                    for day in (routine_response.get("weekly_routine") or [])[:1]
+                    if isinstance(day, dict)
+                ],
+            }
+            if isinstance(routine_snapshot, dict)
+            else None
+        ),
+        "analysis_context": [
+            {
+                "source": item.get("source"),
+                "title": item.get("title"),
+                "knowledge_id": item.get("knowledge_id"),
+                "prescription": item.get("prescription"),
+            }
+            for item in (analysis_context or [])[:2]
+            if isinstance(item, dict)
+        ],
         "detected_signals": signal_data,
     }
 

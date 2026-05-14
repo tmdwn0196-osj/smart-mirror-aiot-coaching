@@ -115,7 +115,11 @@ def _expand_profile_routine_days(
     }
 
     expanded_days: list[dict] = []
-    for day in routine_response.get("weekly_routine") or []:
+    # Day detail expansion is intentionally capped to keep routine/profile latency stable.
+    for index, day in enumerate(routine_response.get("weekly_routine") or []):
+        if index >= 1:
+            expanded_days.append(day)
+            continue
         remaining = _remaining_seconds(started_at, REQUEST_DEADLINE_SECONDS)
         if remaining <= 0.75:
             expanded_days.append(day)

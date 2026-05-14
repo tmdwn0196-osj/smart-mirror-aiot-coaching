@@ -17,14 +17,12 @@ PC3 저장소 문서 스타일에 맞춰 저장소 기준 정보와 주요 변�
 
 아직 커밋하지 않았지만 현재 워크트리에 반영된 주요 변경은 아래와 같습니다.
 
-- PC2 primary 모델 기본값을 NVIDIA hosted `mistralai/mistral-nemotron`으로 변경했습니다.
-- `PRIMARY_LLM_TIMEOUT_SECONDS`, `ROUTINE_PROFILE_TIMEOUT_SECONDS`, `REQUEST_DEADLINE_SECONDS`, `ROUTINE_DAY_DETAIL_TIMEOUT_SECONDS` 기본값을 상향해 primary LLM을 더 현실적으로 사용할 수 있게 조정했습니다.
-- `llm_client`에서 `reasoning_content`만 있고 최종 `content`가 없는 provider 응답을 즉시 예외 처리하도록 바꿨습니다.
-- `/api/routine/profile`은 primary 호출 실패나 파싱 실패 시 `503`으로 종료하지 않고 local rule fallback 루틴을 반환하도록 바뀌었습니다.
-- profile routine day 상세 확장은 전체 요청 deadline 안에서 남은 시간 기준으로 재시도하도록 조정했습니다.
-- 테스트 헬퍼가 `postgresql+psycopg://` DSN과 `psycopg.connect()`를 함께 처리하도록 보정했습니다.
-- PostgreSQL 연결 기준 전체 `unittest` 26개를 다시 실행해 통과를 확인했습니다.
-- no-LLM 모드로 `scripts/smoke_pc2.py`를 다시 실행해 baseline, generate, duplicate session, logs, `422` rejection까지 통과를 확인했습니다.
+- `routine/profile`의 day-detail 확장을 첫 1일까지만 수행하도록 줄여서 추가 LLM 호출 수를 낮췄습니다.
+- `compact_for_prompt()`에서 prompt 입력에 들어가는 분석 문맥을 더 압축했습니다.
+- `coach/generate`와 `routine/profile` prompt 문구를 줄이되 `mode`, `event`, `features.exercise`, `available_days_per_week`, `latest_profile_routine` 같은 핵심 변수는 유지했습니다.
+- `routine/profile` day별 상세 생성 기본 문구를 간결하게 조정해 응답 길이와 토큰 사용량을 낮췄습니다.
+- `test_generate_profile_routine_success_with_mocked_llm`의 기대 호출 수를 현재 동작에 맞게 조정했습니다.
+- 전체 `unittest` 26개를 다시 실행해 통과를 확인했습니다.
 
 ### 2026-05-13T12:20:28+09:00 `df12985`
 
