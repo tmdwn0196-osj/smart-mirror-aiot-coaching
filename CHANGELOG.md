@@ -6,12 +6,20 @@ PC3 저장소 문서 스타일에 맞춰 저장소 기준 정보와 주요 변�
 ## 저장소 기준
 
 - 현재 브랜치: `main`
-- 현재 HEAD: `ba3662ebeca17d6b70d084d42e90b58262a2c72a`
-- `origin/main`: `ba3662ebeca17d6b70d084d42e90b58262a2c72a`
+- 현재 HEAD: `18997410e7f3665bf31197a3c4f4951b335ee434`
+- `origin/main`: `18997410e7f3665bf31197a3c4f4951b335ee434`
 - origin URL: `https://github.com/tmdwn0196-osj/smart-mirror-aiot-coaching.git`
 - 기준 명령: `git log --date=iso-strict --format="%h %ad %s"`
 
 ## 커밋 이력
+
+### 2026-05-14T16:53:49+09:00 `1899741`
+
+`feat(pc2): 코치 응답 형식 고정 강화`
+
+- `coach/generate`의 system/user prompt에 JSON 계약과 금지 규칙을 더 강하게 명시했습니다.
+- fallback LLM 응답도 먼저 JSON 파싱을 시도하고, JSON일 때는 구조화 응답으로 우선 처리하도록 바꿨습니다.
+- JSON이 아닌 fallback만 최후 수단으로 평문 처리하도록 해서 형식 이탈 가능성을 줄였습니다.
 
 ### 2026-05-14T15:24:26+09:00 `ba3662e`
 
