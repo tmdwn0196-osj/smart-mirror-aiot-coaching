@@ -6,16 +6,16 @@ PC3 저장소 문서 스타일에 맞춰 저장소 기준 정보와 주요 변�
 ## 저장소 기준
 
 - 현재 브랜치: `main`
-- 현재 HEAD: `df12985ca0140c6cee2fa0f9a983f4641e86e9c3`
-- `origin/main`: `df12985ca0140c6cee2fa0f9a983f4641e86e9c3`
+- 현재 HEAD: `ba3662ebeca17d6b70d084d42e90b58262a2c72a`
+- `origin/main`: `ba3662ebeca17d6b70d084d42e90b58262a2c72a`
 - origin URL: `https://github.com/tmdwn0196-osj/smart-mirror-aiot-coaching.git`
 - 기준 명령: `git log --date=iso-strict --format="%h %ad %s"`
 
 ## 커밋 이력
 
-### 미커밋 작업
+### 2026-05-14T15:24:26+09:00 `ba3662e`
 
-아직 커밋하지 않았지만 현재 워크트리에 반영된 주요 변경은 아래와 같습니다.
+`feat(pc2): 프롬프트 압축과 루틴 호출량 최적화`
 
 - `routine/profile`의 day-detail 확장을 첫 1일까지만 수행하도록 줄여서 추가 LLM 호출 수를 낮췄습니다.
 - `compact_for_prompt()`에서 prompt 입력에 들어가는 분석 문맥을 더 압축했습니다.
