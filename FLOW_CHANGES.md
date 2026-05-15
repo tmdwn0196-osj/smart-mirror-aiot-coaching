@@ -12,6 +12,44 @@ PC2는 두 가지 핵심 경로를 담당합니다.
 - 프로필 기반 루틴 생성
   - PC1 프로필을 PC3가 중계해 `/api/routine/profile`로 주간 루틴과 날짜별 루틴을 생성
 
+## 2026-05-15 16:32:41 +09:00 - 프로필 루틴 실패 계약 복원
+
+이번 변경에서는 `/api/routine/profile`의 실패 책임을 다시 PC3 쪽으로 분리할 수 있게 PC2 동작을 문서 계약에 맞춰 되돌렸습니다.
+
+변경 전 흐름:
+
+```text
+PC1 profile
+  -> PC3
+    -> PC2 /api/routine/profile
+      -> primary LLM 미설정 또는 실패
+      -> PC2 local fallback routine 생성
+      -> 200 응답
+    -> PC1
+```
+
+변경 후 흐름:
+
+```text
+PC1 profile
+  -> PC3
+    -> PC2 /api/routine/profile
+      -> primary LLM 미설정
+         -> 503 detail.reason=primary_llm_unconfigured
+      -> 또는 primary LLM 호출 실패
+         -> 503 detail.reason=primary_llm_call_failed
+      -> 또는 primary LLM 응답 파싱 실패
+         -> 503 detail.reason=primary_llm_parse_failed
+    -> PC3가 fallback owner로서 기본 루틴 또는 실패 UX 처리
+```
+
+정리 포인트:
+
+- PC2는 프로필 루틴 생성 성공 또는 실패만 반환합니다.
+- PC2는 `/api/routine/profile` 실패 시 로컬 fallback 루틴을 저장하거나 반환하지 않습니다.
+- 프로필 루틴 저장과 `profile_routine_days` 저장은 primary LLM 결과 파싱이 성공한 경우에만 진행됩니다.
+- PC3는 `503`을 보고 자기 저장소 기준 fallback 루틴 또는 사용자 안내를 처리할 수 있습니다.
+
 ## 데이터 흐름 변경
 
 ### 초기 데이터 흐름

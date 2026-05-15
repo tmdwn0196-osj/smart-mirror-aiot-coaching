@@ -6,12 +6,20 @@ PC3 저장소 문서 스타일에 맞춰 저장소 기준 정보와 주요 변�
 ## 저장소 기준
 
 - 현재 브랜치: `main`
-- 현재 HEAD: `0cb6bcbb414f0460a63278669e2013961b98b91a`
+- 현재 HEAD: `92fbc62b6e2ffb9dee06b706ee98ae0b915398d5`
 - `origin/main`: `0cb6bcbb414f0460a63278669e2013961b98b91a`
 - origin URL: `https://github.com/tmdwn0196-osj/smart-mirror-aiot-coaching.git`
 - 기준 명령: `git log --date=iso-strict --format="%h %ad %s"`
 
 ## 커밋 이력
+
+### 2026-05-15T16:32:41+09:00 `92fbc62`
+
+`fix(pc2): 프로필 루틴 실패 시 503 계약 복원`
+
+- `/api/routine/profile`에서 primary LLM 미설정 시 로컬 fallback 루틴을 만들지 않고 `503`과 `detail.reason=primary_llm_unconfigured`를 반환하도록 되돌렸습니다.
+- primary LLM 호출 실패는 `503`과 `detail.reason=primary_llm_call_failed`로, 응답 파싱 실패는 `503`과 `detail.reason=primary_llm_parse_failed`로 구분해 반환하도록 정리했습니다.
+- 프로필 루틴 관련 테스트 기대값도 local fallback 성공 응답에서 `503` 실패 계약 기준으로 수정했습니다.
 
 ### 2026-05-14T17:20:39+09:00 `0cb6bcb`
 
