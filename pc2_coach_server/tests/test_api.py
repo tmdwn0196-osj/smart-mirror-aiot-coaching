@@ -591,26 +591,27 @@ class PC2ApiTests(unittest.TestCase):
         )
 
     def test_generate_profile_routine_requires_primary_llm(self):
-        response = self.main.generate_profile_routine(
-            self.main.RoutineProfileRequest(**self._profile_payload())
-        )
-        self.assertIn("weekly_routine", response)
-        self.assertIn("LLM 문제로 로컬 기본 루틴", response["cautions"][-1])
+        with self.assertRaises(HTTPException) as ctx:
+            self.main.generate_profile_routine(
+                self.main.RoutineProfileRequest(**self._profile_payload())
+            )
+        self.assertEqual(ctx.exception.status_code, 503)
+        self.assertEqual(ctx.exception.detail["reason"], "primary_llm_unconfigured")
 
-    def test_generate_profile_routine_primary_failure_returns_local_fallback(self):
+    def test_generate_profile_routine_primary_failure_returns_503(self):
         with patch("app.services.is_primary_llm_configured", return_value=True), patch(
             "app.services.call_primary_llm", side_effect=RuntimeError("forced failure")
         ):
-            response = self.main.generate_profile_routine(
-                self.main.RoutineProfileRequest(
-                    **self._profile_payload(restricted_body_parts=["무릎", "어깨"])
+            with self.assertRaises(HTTPException) as ctx:
+                self.main.generate_profile_routine(
+                    self.main.RoutineProfileRequest(
+                        **self._profile_payload(restricted_body_parts=["무릎", "어깨"])
+                    )
                 )
-            )
-        self.assertTrue(response["summary"].startswith("LLM 응답 문제가 있어"))
-        self.assertIn("weekly_routine", response)
-        self.assertEqual(response["weekly_routine"][0]["exercises"][0]["exercise"], "pushup")
+        self.assertEqual(ctx.exception.status_code, 503)
+        self.assertEqual(ctx.exception.detail["reason"], "primary_llm_call_failed")
 
-    def test_generate_profile_routine_parse_failure_returns_local_fallback(self):
+    def test_generate_profile_routine_parse_failure_returns_503(self):
         llm_result = {
             "content": "not-json",
             "served_by": "primary",
@@ -621,13 +622,14 @@ class PC2ApiTests(unittest.TestCase):
         with patch("app.services.is_primary_llm_configured", return_value=True), patch(
             "app.services.call_primary_llm", return_value=llm_result
         ):
-            response = self.main.generate_profile_routine(
-                self.main.RoutineProfileRequest(
-                    **self._profile_payload(restricted_body_parts=["무릎", "어깨"])
+            with self.assertRaises(HTTPException) as ctx:
+                self.main.generate_profile_routine(
+                    self.main.RoutineProfileRequest(
+                        **self._profile_payload(restricted_body_parts=["무릎", "어깨"])
+                    )
                 )
-            )
-        self.assertTrue(response["summary"].startswith("LLM 응답 문제가 있어"))
-        self.assertEqual(response["pc3_payload"]["weekly_routine"][0]["exercises"][0]["exercise"], "pushup")
+        self.assertEqual(ctx.exception.status_code, 503)
+        self.assertEqual(ctx.exception.detail["reason"], "primary_llm_parse_failed")
 
     def test_profile_routine_request_rejects_invalid_days(self):
         with self.assertRaises(ValidationError) as ctx:

@@ -666,12 +666,14 @@ def generate_profile_routine_response(payload: RoutineProfileRequest, logger) ->
 
     if not is_primary_llm_configured():
         logger.warning(
-            "profile_routine_request_local_fallback request_id=%s user_id=%s reason=primary_llm_unconfigured",
+            "profile_routine_request_failed request_id=%s user_id=%s reason=primary_llm_unconfigured",
             request_id,
             payload.user_id,
         )
-        final_response = build_local_routine_response(payload, "primary llm unconfigured")
-        llm_result = local_llm_result("primary_llm_unconfigured")
+        raise HTTPException(
+            status_code=503,
+            detail={"reason": "primary_llm_unconfigured"},
+        )
     else:
         try:
             llm_result = call_primary_llm(
@@ -683,7 +685,7 @@ def generate_profile_routine_response(payload: RoutineProfileRequest, logger) ->
             raw_llm = llm_result["content"]
             try:
                 final_response = parse_profile_routine_json(raw_llm, base_response)
-            except Exception:
+            except Exception as exc:
                 retry_remaining = _remaining_seconds(started_at, REQUEST_DEADLINE_SECONDS, reserve_seconds=3.0)
                 if retry_remaining > 0.75:
                     retry_result = call_primary_llm(
@@ -694,18 +696,43 @@ def generate_profile_routine_response(payload: RoutineProfileRequest, logger) ->
                     )
                     llm_result = retry_result
                     raw_llm = retry_result["content"]
-                    final_response = parse_profile_routine_json(raw_llm, base_response)
+                    try:
+                        final_response = parse_profile_routine_json(raw_llm, base_response)
+                    except Exception as retry_exc:
+                        logger.warning(
+                            "profile_routine_request_failed request_id=%s user_id=%s reason=primary_llm_parse_failed error=%s",
+                            request_id,
+                            payload.user_id,
+                            retry_exc,
+                        )
+                        raise HTTPException(
+                            status_code=503,
+                            detail={"reason": "primary_llm_parse_failed"},
+                        ) from retry_exc
                 else:
-                    raise
+                    logger.warning(
+                        "profile_routine_request_failed request_id=%s user_id=%s reason=primary_llm_parse_failed error=%s",
+                        request_id,
+                        payload.user_id,
+                        exc,
+                    )
+                    raise HTTPException(
+                        status_code=503,
+                        detail={"reason": "primary_llm_parse_failed"},
+                    ) from exc
+        except HTTPException:
+            raise
         except Exception as exc:
             logger.warning(
-                "profile_routine_request_local_fallback request_id=%s user_id=%s reason=primary_llm_failed error=%s",
+                "profile_routine_request_failed request_id=%s user_id=%s reason=primary_llm_call_failed error=%s",
                 request_id,
                 payload.user_id,
                 exc,
             )
-            final_response = build_local_routine_response(payload, "primary llm failed")
-            llm_result = local_llm_result(f"primary_llm_failed: {exc}")
+            raise HTTPException(
+                status_code=503,
+                detail={"reason": "primary_llm_call_failed"},
+            ) from exc
 
     detailed_days = _expand_profile_routine_days(payload, final_response, logger, request_id, started_at)
     final_response["weekly_routine"] = detailed_days
