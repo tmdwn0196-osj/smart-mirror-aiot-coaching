@@ -3,31 +3,26 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+
 EXERCISE_TYPE_VALUES = ("squat", "jumping_jack", "knee_raise", "lunge", "pushup")
 EXERCISE_TYPE_ALIASES = {
     "squat": "squat",
-    "스쿼트": "squat",
     "tempo squat": "squat",
     "box squat": "squat",
     "jumping_jack": "jumping_jack",
     "jumping jack": "jumping_jack",
     "jumping-jack": "jumping_jack",
-    "점핑잭": "jumping_jack",
     "knee_raise": "knee_raise",
     "knee raise": "knee_raise",
     "knee-raise": "knee_raise",
     "knee raises": "knee_raise",
-    "니 레이즈": "knee_raise",
     "lunge": "lunge",
-    "런지": "lunge",
     "reverse lunge": "lunge",
     "pushup": "pushup",
     "push-up": "pushup",
     "push up": "pushup",
     "pushups": "pushup",
-    "푸시업": "pushup",
 }
-
 
 CoachMode = Literal["exercise"]
 CoachEvent = Literal["session_completed"]
@@ -55,6 +50,8 @@ class ExerciseFeature(ContractModel):
     duration_sec: float | None = None
     duration_seconds: float | None = None
     tempo: str | None = None
+    measurement_quality: str | None = None
+    measurement_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 class FeatureBundle(ContractModel):
@@ -82,6 +79,8 @@ class EnvironmentFeature(ContractModel):
 class FeaturePayload(ContractModel):
     user_id: str
     session_id: str | None = None
+    routine_id: str | None = None
+    routine_day_id: str | int | None = None
     mode: CoachMode = "exercise"
     event: CoachEvent
     features: FeatureBundle = Field(default_factory=FeatureBundle)
@@ -93,63 +92,10 @@ class FeaturePayload(ContractModel):
     def validate_exercise_payload(self):
         if self.mode == "exercise":
             if self.features.exercise is None:
-                raise ValueError("exercise mode에서는 features.exercise가 필요합니다.")
+                raise ValueError("features.exercise is required for exercise mode.")
             if not self.features.exercise.type:
-                raise ValueError("exercise mode에서는 features.exercise.type이 필요합니다.")
+                raise ValueError("features.exercise.type is required for exercise mode.")
         return self
-
-
-class DetectedSignal(BaseModel):
-    category: str
-    label: str
-    value: str | float | int | bool | list[str] | None = None
-    severity: int = Field(default=2, ge=1, le=3)
-
-
-class ExerciseBaselineProfile(ContractModel):
-    exercise_type: ExerciseType
-    sample_count: int
-    rep_count_avg: float | None = None
-    duration_sec_avg: float | None = None
-    stability_score_avg: float | None = None
-    knee_angle_avg: float | None = None
-    squat_depth_avg: float | None = None
-    back_angle_mode: str | None = None
-    tempo_mode: str | None = None
-    frequent_posture_errors: list[str] = Field(default_factory=list)
-    recommended_sets: int | None = None
-    recommended_reps: int | None = None
-    recommended_duration_sec: int | None = None
-
-
-class ExerciseBaselineCreateRequest(ContractModel):
-    user_id: str
-    exercise_type: ExerciseType
-    samples: list[ExerciseFeature] = Field(min_length=1)
-    purpose: str | None = None
-
-    @model_validator(mode="after")
-    def validate_sample_types(self):
-        invalid_samples = [
-            index + 1
-            for index, sample in enumerate(self.samples)
-            if sample.type is not None and sample.type != self.exercise_type
-        ]
-        if invalid_samples:
-            positions = ", ".join(str(index) for index in invalid_samples)
-            raise ValueError(
-                f"samples.type은 exercise_type과 일치해야 합니다. 불일치 sample index: {positions}"
-            )
-        return self
-
-
-class ExerciseBaselineRecord(ContractModel):
-    baseline_id: str
-    user_id: str
-    exercise_type: ExerciseType
-    purpose: str | None = None
-    baseline_profile: ExerciseBaselineProfile
-    created_at: str
 
 
 class ExercisePlanItem(ContractModel):
@@ -167,6 +113,7 @@ class ExercisePlanItem(ContractModel):
 class PC2Payload(ContractModel):
     message: str
     display_lines: list[str] = Field(default_factory=list)
+    evidence: list[dict] = Field(default_factory=list)
 
 
 class CoachingResponse(ContractModel):
@@ -188,6 +135,8 @@ class RoutineProfileRequest(ContractModel):
     restricted_body_parts: list[str] = Field(default_factory=list)
     purpose: str | None = None
     start_date: date | None = None
+    user_history: dict | None = None
+    weekly_adjustment: dict | None = None
 
 
 class WeeklyRoutineDay(ContractModel):
@@ -205,26 +154,8 @@ class RoutineProfileResponse(ContractModel):
     pc3_payload: dict = Field(default_factory=dict)
 
 
-class RoutineProfileRecord(ContractModel):
-    routine_id: str
-    user_id: str
-    profile_name: str | None = None
-    weight_kg: float | None = None
-    user_goal: str
-    exercise_experience: str
-    available_days_per_week: int = Field(ge=1, le=7)
-    restricted_body_parts: list[str] = Field(default_factory=list)
-    purpose: str | None = None
-    start_date: str | None = None
-    scheduled_dates: list[str] = Field(default_factory=list)
-    routine_response: RoutineProfileResponse
-    source_model: str
-    llm_route: str | None = None
-    status: str
-    created_at: str
-
-
 class RoutineProfileDayRecord(ContractModel):
+    routine_day_id: int | None = None
     routine_id: str
     user_id: str
     scheduled_date: str
@@ -236,3 +167,65 @@ class RoutineProfileDayRecord(ContractModel):
     weekly_focus: str
     message: str
     created_at: str | None = None
+
+
+class BodyMetricRequest(ContractModel):
+    measured_date: date
+    weight_kg: float = Field(ge=1, le=500)
+    memo: str | None = None
+
+
+class BodyMetricRecord(ContractModel):
+    id: int
+    user_id: str
+    measured_date: str
+    weight_kg: float
+    memo: str | None = None
+    created_at: str
+
+
+class WorkoutSkipRequest(ContractModel):
+    session_id: str
+    user_id: str
+    routine_id: str | None = None
+    routine_day_id: str | int | None = None
+    exercise_type: str
+    completed_reps: int | None = Field(default=None, ge=0, le=1000)
+    duration_sec: float | None = Field(default=None, ge=0)
+    stability_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    posture_errors: list[str] = Field(default_factory=list)
+    measurement_quality: str | None = None
+    measurement_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    skip_reason: str | None = None
+
+
+class CalendarDayRecord(ContractModel):
+    date: str
+    routine_id: str | None = None
+    routine_day_id: int | None = None
+    day_index: int | None = None
+    focus: str | None = None
+    exercises: list[ExercisePlanItem] = Field(default_factory=list)
+    completed: bool = False
+    skipped: bool = False
+    skipped_count: int = 0
+    workout_results: list[dict] = Field(default_factory=list)
+    coach_log_ids: list[int] = Field(default_factory=list)
+
+
+class CalendarResponse(ContractModel):
+    user_id: str
+    from_date: str
+    to_date: str
+    days: list[CalendarDayRecord] = Field(default_factory=list)
+
+
+class ProgressResponse(ContractModel):
+    user_id: str
+    days: int
+    body_metrics: list[BodyMetricRecord] = Field(default_factory=list)
+    weight_delta_kg: float | None = None
+    workout_summary: dict = Field(default_factory=dict)
+    recent_workouts: list[dict] = Field(default_factory=list)
+    recent_coaching: list[dict] = Field(default_factory=list)
+    latest_routine: dict | None = None
