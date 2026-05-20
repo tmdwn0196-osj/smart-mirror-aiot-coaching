@@ -42,6 +42,15 @@ def _resolve_routine_start_date(payload: RoutineProfileRequest) -> date:
     return payload.start_date or date.today()
 
 
+def _build_scheduled_dates(start_date: date, available_days_per_week: int, weekly_routine: list[dict]) -> list[str]:
+    routine_days = weekly_routine or []
+    if available_days_per_week <= 4:
+        day_offsets = [index * 2 for index, _ in enumerate(routine_days)]
+    else:
+        day_offsets = list(range(len(routine_days)))
+    return [(start_date + timedelta(days=offset)).isoformat() for offset in day_offsets]
+
+
 def _remaining_seconds(started_at: float, limit_seconds: float, reserve_seconds: float = 0.5) -> float:
     elapsed = perf_counter() - started_at
     return max(0.0, limit_seconds - elapsed - reserve_seconds)
@@ -603,10 +612,11 @@ def generate_profile_routine_response(payload: RoutineProfileRequest, logger) ->
 
     routine_id = f"routine_{uuid4().hex[:12]}"
     start_date = _resolve_routine_start_date(payload)
-    scheduled_dates = [
-        (start_date + timedelta(days=index)).isoformat()
-        for index, _ in enumerate(final_response.get("weekly_routine") or [])
-    ]
+    scheduled_dates = _build_scheduled_dates(
+        start_date,
+        payload.available_days_per_week,
+        final_response.get("weekly_routine") or [],
+    )
     final_response["pc3_payload"] = {
         **(final_response.get("pc3_payload") or {}),
         "routine_id": routine_id,
