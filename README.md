@@ -36,18 +36,6 @@ PC1 UI -> PC3 Vision Gateway -> PC2 NVIDIA/RAG Engine
 
 이 저장소는 위 문제를 해결하기 위해 PC2를 RAG 기반 생성 엔진으로 정리한 결과물입니다.
 
-## 역할
-
-이 리포에서 맡은 역할은 PC2 백엔드의 구조 정리와 생성 파이프라인 안정화입니다.
-
-- FastAPI 기반 PC2 API 구조 정리
-- NVIDIA OpenAI-compatible API 연동
-- PostgreSQL/pgvector 기반 RAG 흐름 구성
-- 프로필 루틴 생성과 운동 후 코칭 생성 API 설계
-- JSON 응답 계약 정규화와 validator 보강
-- 문서 구조 재정리
-- 기존 `main` 문서를 `main-old`로 분리하고 새 `main` 기준 문서 체계 정리
-
 ## PC2의 역할
 
 PC2는 전체 프로젝트에서 "생성 엔진 + 운동 지식 검색 엔진" 역할을 맡습니다.
@@ -77,6 +65,8 @@ PC1 UI
       -> NVIDIA Embedding / Rerank
       -> PostgreSQL / pgvector
 ```
+
+![서비스 구조 다이어그램](old_main_docs/rt.png)
 
 ### PC2 내부 흐름
 
@@ -142,9 +132,6 @@ Request from PC3
 ├── data/
 │   └── exercise_knowledge_seed.json
 ├── old_main_docs/
-│   ├── README.md
-│   ├── CHANGELOG.md
-│   └── FLOW_CHANGES.md
 ├── CHANGELOG.md
 ├── FLOW_CHANGES.md
 └── requirements.txt
