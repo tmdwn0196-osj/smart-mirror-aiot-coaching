@@ -5,10 +5,7 @@
 .ruff_cache/
 __pycache__/
 *.py[cod]
+*.log
 
-data/*.db
-
-pc2_coach_server/.env
-pc2_coach_server/.venv/
-pc2_coach_server/**/__pycache__/
-pc2_coach_server/data/*.db
+data/*
+!data/exercise_knowledge_seed.json
