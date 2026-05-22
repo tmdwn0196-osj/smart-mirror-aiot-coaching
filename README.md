@@ -36,7 +36,7 @@ PC1 UI -> PC3 Vision Gateway -> PC2 NVIDIA/RAG Engine
 
 이 저장소는 위 문제를 해결하기 위해 PC2를 RAG 기반 생성 엔진으로 정리한 결과물입니다.
 
-## 내 역할
+## 역할
 
 이 리포에서 맡은 역할은 PC2 백엔드의 구조 정리와 생성 파이프라인 안정화입니다.
 
@@ -47,15 +47,6 @@ PC1 UI -> PC3 Vision Gateway -> PC2 NVIDIA/RAG Engine
 - JSON 응답 계약 정규화와 validator 보강
 - 문서 구조 재정리
 - 기존 `main` 문서를 `main-old`로 분리하고 새 `main` 기준 문서 체계 정리
-
-## 핵심 성과
-
-- `pc2_coach_server/` 중심의 예전 중첩 구조를 루트 `app/` 기준 단일 앱 구조로 단순화했습니다.
-- PC2를 "PC3가 호출하는 NVIDIA/RAG 생성 엔진"으로 역할 재정의했습니다.
-- `POST /api/routine/profile`에서 `scheduled_dates` 계산 규칙을 정리해 주 1~4회는 격일, 5회 이상은 연속 배정으로 맞췄습니다.
-- 코칭/루틴 응답을 PC3가 바로 사용할 수 있는 구조화 JSON 형태로 안정화했습니다.
-- PostgreSQL/pgvector를 이용한 운동 지식 검색, rerank, evidence 주입 흐름을 정리했습니다.
-- 과거 문서 스냅샷은 `old_main_docs/`에 보존하고, 현재 문서를 새 구조 기준으로 재작성했습니다.
 
 ## PC2의 역할
 
@@ -133,7 +124,7 @@ Request from PC3
 | DB | PostgreSQL, pgvector, SQLite fallback |
 | ORM/Core | SQLAlchemy |
 | Config | python-dotenv |
-| Logging | Python logging, `logging.yaml`, PyYAML |
+| Logging | Python logging |
 | AI Provider | NVIDIA OpenAI-compatible API |
 
 ## 디렉터리 구조
@@ -156,7 +147,6 @@ Request from PC3
 │   └── FLOW_CHANGES.md
 ├── CHANGELOG.md
 ├── FLOW_CHANGES.md
-├── logging.yaml
 └── requirements.txt
 ```
 
